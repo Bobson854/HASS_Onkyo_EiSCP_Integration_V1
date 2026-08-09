@@ -130,6 +130,8 @@ PLATFORMS = [
 ]
 
 SERVICE_SEND_RAW = "send_raw"
+SERVICE_PROBE_CAPABILITIES = "probe_capabilities"
 
 ATTR_ISCP_COMMAND = "iscp_command"
 ATTR_RESPONSE = "response"
+ATTR_ENTRY_ID = "entry_id"

@@ -66,6 +66,11 @@ class PioneerEiscpCoordinator(DataUpdateCoordinator[ReceiverState]):
         """Send a raw ISCP command through the receiver."""
         await self.receiver.send_raw(iscp_command)
 
+    async def async_probe_capabilities(self) -> None:
+        """Run capability probe and refresh coordinator state."""
+        await self.receiver.probe_capabilities()
+        self.async_set_updated_data(self.receiver.state)
+
     def get_diagnostics(self) -> dict[str, Any]:
         """Return diagnostic payload."""
         return {
@@ -73,4 +78,5 @@ class PioneerEiscpCoordinator(DataUpdateCoordinator[ReceiverState]):
             "port": self.receiver.port,
             "connected": self.receiver.connected,
             "state": self.receiver.state.as_dict(),
+            "capability_probe": self.receiver.capabilities.as_dict(),
         }

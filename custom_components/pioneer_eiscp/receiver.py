@@ -25,6 +25,7 @@ from .const import (
     normalize_port,
 )
 from .protocol.framing import EiscpFrame
+from .protocol.capability_probe import CapabilitySnapshot, run_capability_probe
 from .protocol.parsers import (
     AudioInformation,
     VideoInformation,
@@ -63,6 +64,7 @@ class ReceiverState:
     video: VideoInformation = field(default_factory=VideoInformation)
     raw_commands: dict[str, str] = field(default_factory=dict)
     connected: bool = False
+    capability_probe: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         """Return full internal state for diagnostics."""
@@ -87,6 +89,7 @@ class ReceiverState:
             "audio": self.audio.as_dict(),
             "video": self.video.as_dict(),
             "raw_commands": dict(self.raw_commands),
+            "capability_probe": self.capability_probe,
         }
 
 
@@ -98,6 +101,9 @@ class PioneerReceiver:
         self.port = normalize_port(port)
         self.state = ReceiverState()
         self._listeners: list[asyncio.Event] = []
+        self._probe_waiters: dict[str, asyncio.Future[EiscpFrame]] = {}
+        self._probe_lock = asyncio.Lock()
+        self.capabilities = CapabilitySnapshot()
         self._connection = EiscpConnection(
             host,
             port,
@@ -175,6 +181,34 @@ class PioneerReceiver:
         """Request IFV video information."""
         await self.send_raw(f"{CMD_VIDEO_INFO}{QUERY_SUFFIX}")
 
+    async def probe_capabilities(self) -> CapabilitySnapshot:
+        """Run a manual read-only capability probe using the live connection."""
+        if not self.connected:
+            raise ConnectionError("Not connected to receiver")
+
+        async with self._probe_lock:
+            snapshot = await run_capability_probe(
+                self.send_raw,
+                self._probe_wait_for,
+            )
+            self.capabilities = snapshot
+            self.state.capability_probe = snapshot.as_dict()
+            self._notify_listeners()
+            return snapshot
+
+    async def _probe_wait_for(self, command: str, timeout: float) -> EiscpFrame | None:
+        """Wait for a correlated probe response by 3-letter command prefix."""
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[EiscpFrame] = loop.create_future()
+        self._probe_waiters[command] = future
+        try:
+            return await asyncio.wait_for(future, timeout)
+        except asyncio.TimeoutError:
+            return None
+        finally:
+            if self._probe_waiters.get(command) is future:
+                del self._probe_waiters[command]
+
     async def _on_connected(self) -> None:
         self.state.connected = True
         self._notify_listeners()
@@ -186,6 +220,10 @@ class PioneerReceiver:
 
     async def _handle_frame(self, frame: EiscpFrame) -> None:
         """Process an incoming ISCP frame and update internal state."""
+        waiter = self._probe_waiters.get(frame.command)
+        if waiter and not waiter.done():
+            waiter.set_result(frame)
+
         cmd = frame.command
         param = frame.parameter
         self.state.raw_commands[cmd] = frame.raw_iscp

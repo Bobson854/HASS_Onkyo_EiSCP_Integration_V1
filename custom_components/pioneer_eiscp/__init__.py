@@ -14,14 +14,17 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import device_registry as dr
 
 from .const import (
+    ATTR_ENTRY_ID,
     ATTR_ISCP_COMMAND,
     DEFAULT_PORT,
     DOMAIN,
     PLATFORMS,
+    SERVICE_PROBE_CAPABILITIES,
     SERVICE_SEND_RAW,
     normalize_port,
 )
 from .coordinator import PioneerEiscpCoordinator
+from .helpers import resolve_coordinator
 from .receiver import PioneerReceiver
 
 _LOGGER = logging.getLogger(__name__)
@@ -37,25 +40,42 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
     async def handle_send_raw(call: ServiceCall) -> None:
         command = call.data[ATTR_ISCP_COMMAND]
+        coordinator = resolve_coordinator(hass, call)
+        if not coordinator:
+            _LOGGER.warning("No pioneer_eiscp coordinator matched for send_raw")
+            return
         _LOGGER.debug("Service send_raw: %s", command)
-        for entry in hass.config_entries.async_entries(DOMAIN):
-            coordinator: PioneerEiscpCoordinator | None = entry.runtime_data
-            if coordinator and coordinator.receiver.connected:
-                await coordinator.async_send_raw(command)
-                return
-        # Fall back to first entry even if disconnected (will raise/queue).
-        for entry in hass.config_entries.async_entries(DOMAIN):
-            coordinator = entry.runtime_data
-            if coordinator:
-                await coordinator.async_send_raw(command)
-                return
-        _LOGGER.warning("No pioneer_eiscp config entries loaded")
+        await coordinator.async_send_raw(command)
+
+    async def handle_probe_capabilities(call: ServiceCall) -> None:
+        coordinator = resolve_coordinator(hass, call)
+        if not coordinator:
+            _LOGGER.warning("No pioneer_eiscp coordinator matched for probe_capabilities")
+            return
+        if not coordinator.receiver.connected:
+            _LOGGER.warning("Capability probe skipped: receiver not connected")
+            return
+        await coordinator.async_probe_capabilities()
 
     hass.services.async_register(
         DOMAIN,
         SERVICE_SEND_RAW,
         handle_send_raw,
-        schema=vol.Schema({vol.Required(ATTR_ISCP_COMMAND): str}),
+        schema=vol.Schema(
+            {
+                vol.Required(ATTR_ISCP_COMMAND): str,
+                vol.Optional(ATTR_ENTRY_ID): str,
+            }
+        ),
+        supports_response=False,
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_PROBE_CAPABILITIES,
+        handle_probe_capabilities,
+        schema=vol.Schema({vol.Optional(ATTR_ENTRY_ID): str}),
+        supports_response=False,
     )
 
     return True

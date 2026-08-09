@@ -90,6 +90,27 @@ data:
 
 Other useful queries: `IFVQSTN`, `LMDQSTN`, `PWRQSTN`.
 
+## Capability probe (early development)
+
+Run a **read-only** capability probe to capture what your receiver reports (including NRI XML) without creating new entities:
+
+```yaml
+service: pioneer_eiscp.probe_capabilities
+target:
+  device_id: your_pioneer_device_id
+```
+
+Or from Developer Tools without a target when only one AVR is configured.
+
+The probe:
+
+- sends read-only `QSTN` queries sequentially (PWR, MVL, AMT, SLI, LMD, IFA, IFV, NRI)
+- correlates responses by 3-letter command prefix
+- stores raw and parsed results in **diagnostics** under `capability_probe`
+- does **not** automatically create Home Assistant entities from responses
+
+Use this to improve model-specific support before hard-coding volume ranges, sources, or modes.
+
 **Debug logging** (`configuration.yaml`):
 
 ```yaml

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.11
+
+- Remove `return` control flow from read-loop `finally` blocks (Python 3.14 `SyntaxWarning`); cleanup moved to `_finalize_read_loop()` with unchanged transport lifecycle behaviour.
+
 ## 0.1.10
 
 - Add transport session IDs, lifecycle diagnostics, and guarded reconnect/connect behaviour.

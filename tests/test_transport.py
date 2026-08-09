@@ -6,8 +6,9 @@ import asyncio
 import importlib.util
 import sys
 import types
+import warnings
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -47,6 +48,26 @@ transport_mod = _load_transport()
 EiscpConnection = transport_mod.EiscpConnection
 DISCONNECT_LOCAL_CLOSE = transport_mod.DISCONNECT_LOCAL_CLOSE
 DISCONNECT_RECEIVER_EOF = transport_mod.DISCONNECT_RECEIVER_EOF
+TRANSPORT_SOURCE = PROTOCOL / "transport.py"
+
+
+class TestTransportSyntax:
+    """Static checks for transport module warnings."""
+
+    def test_transport_module_emits_no_syntax_warning(self) -> None:
+        source = TRANSPORT_SOURCE.read_text(encoding="utf-8")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", SyntaxWarning)
+            compile(source, str(TRANSPORT_SOURCE), "exec")
+
+        syntax_warnings = [item for item in caught if issubclass(item.category, SyntaxWarning)]
+        assert syntax_warnings == []
+
+    def test_read_loop_source_has_no_return_in_finally(self) -> None:
+        source = TRANSPORT_SOURCE.read_text(encoding="utf-8")
+        assert "finally:" not in source.split("async def _read_loop", 1)[1].split(
+            "\n    async def _finalize_read_loop", 1
+        )[0]
 
 
 class MockStreamWriter:
@@ -362,6 +383,82 @@ class TestTransportLifecycle:
 
         diag = conn.get_diagnostics()
         assert diag["last_disconnect_reason"] == transport_mod.DISCONNECT_READ_ERROR
+
+        await conn.stop()
+
+    @pytest.mark.asyncio
+    async def test_cancelled_read_loop_does_not_schedule_reconnect(
+        self, reconnect_interval: float
+    ) -> None:
+        reader = MockStreamReader(hang=True)
+        open_mock = _make_open_connection_factory([reader])
+
+        with patch("asyncio.open_connection", open_mock):
+            conn = EiscpConnection(
+                "192.0.2.1",
+                60128,
+                reconnect_interval=reconnect_interval,
+            )
+            await conn.start()
+            read_task = conn._read_task
+            assert read_task is not None
+            read_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await read_task
+
+        diag = conn.get_diagnostics()
+        assert diag["reconnect_scheduled_count"] == 0
+        assert diag["receiver_closed_count"] == 0
+
+        await conn.stop()
+
+    @pytest.mark.asyncio
+    async def test_stale_read_loop_finalize_does_not_reconnect(
+        self, reconnect_interval: float
+    ) -> None:
+        reader = MockStreamReader(hang=True)
+        open_mock = _make_open_connection_factory([reader])
+
+        with patch("asyncio.open_connection", open_mock):
+            conn = EiscpConnection(
+                "192.0.2.1",
+                60128,
+                reconnect_interval=reconnect_interval,
+            )
+            await conn.start()
+            conn._active_read_session_id = 2
+            await conn._finalize_read_loop(1, DISCONNECT_RECEIVER_EOF)
+
+        assert conn.connected is True
+        assert conn.get_diagnostics()["reconnect_scheduled_count"] == 0
+
+        await conn.stop()
+
+    @pytest.mark.asyncio
+    async def test_read_error_schedules_single_reconnect(
+        self, reconnect_interval: float
+    ) -> None:
+        class BrokenReader(MockStreamReader):
+            async def read(self, _size: int) -> bytes:
+                raise OSError("socket reset")
+
+        reader1 = BrokenReader([])
+        reader2 = MockStreamReader(hang=True)
+        open_mock = _make_open_connection_factory([reader1, reader2])
+
+        with patch("asyncio.open_connection", open_mock):
+            conn = EiscpConnection(
+                "192.0.2.1",
+                60128,
+                reconnect_interval=reconnect_interval,
+            )
+            await conn.start()
+            await asyncio.sleep(reconnect_interval * 2.5)
+
+        diag = conn.get_diagnostics()
+        assert diag["last_disconnect_reason"] == transport_mod.DISCONNECT_READ_ERROR
+        assert diag["reconnect_scheduled_count"] == 1
+        assert diag["successful_connections"] == 2
 
         await conn.stop()
 

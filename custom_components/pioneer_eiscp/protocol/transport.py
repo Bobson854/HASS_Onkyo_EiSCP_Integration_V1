@@ -336,6 +336,7 @@ class EiscpConnection:
     async def _read_loop(self, session_id: int) -> None:
         assert self._reader is not None
         disconnect_reason = DISCONNECT_RECEIVER_EOF
+        cleanup_needed = False
 
         try:
             while not self._closing and self._connected and session_id == self._active_read_session_id:
@@ -353,6 +354,7 @@ class EiscpConnection:
                         session_id,
                     )
                     disconnect_reason = DISCONNECT_RECEIVER_EOF
+                    cleanup_needed = True
                     break
 
                 self._buffer += chunk
@@ -368,30 +370,36 @@ class EiscpConnection:
             raise
         except Exception as err:  # noqa: BLE001 - trigger reconnect
             disconnect_reason = DISCONNECT_READ_ERROR
+            cleanup_needed = True
             _LOGGER.warning(
                 "Pioneer eISCP session %d read error (%s): %s",
                 session_id,
                 type(err).__name__,
                 err,
             )
-        finally:
-            if session_id != self._active_read_session_id:
-                _LOGGER.debug(
-                    "Pioneer eISCP session %d read loop exiting (superseded by session %d)",
-                    session_id,
-                    self._active_read_session_id,
-                )
-                return
 
-            if self._closing:
-                return
+        if cleanup_needed:
+            await self._finalize_read_loop(session_id, disconnect_reason)
 
-            if disconnect_reason == DISCONNECT_LOCAL_CLOSE:
-                return
+    async def _finalize_read_loop(self, session_id: int, disconnect_reason: str) -> None:
+        """Close a ended read session and optionally schedule reconnect."""
+        if session_id != self._active_read_session_id:
+            _LOGGER.debug(
+                "Pioneer eISCP session %d read loop exiting (superseded by session %d)",
+                session_id,
+                self._active_read_session_id,
+            )
+            return
 
-            await self._close_transport(session_id=session_id, reason=disconnect_reason)
-            if not self._closing:
-                await self._schedule_reconnect(disconnect_reason)
+        if self._closing:
+            return
+
+        if disconnect_reason == DISCONNECT_LOCAL_CLOSE:
+            return
+
+        await self._close_transport(session_id=session_id, reason=disconnect_reason)
+        if not self._closing:
+            await self._schedule_reconnect(disconnect_reason)
 
     async def wait_connected(self, timeout: float = CONNECT_TIMEOUT) -> bool:
         """Wait until connected or timeout."""

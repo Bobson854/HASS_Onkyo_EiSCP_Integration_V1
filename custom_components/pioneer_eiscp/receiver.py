@@ -25,6 +25,7 @@ from .const import (
     STARTUP_QUERIES,
     normalize_port,
 )
+from .info_refresh import InfoRefreshScheduler
 from .protocol.framing import EiscpFrame
 from .protocol.capability_probe import CapabilitySnapshot, run_capability_probe
 from .protocol.nri_capabilities import ReceiverCapabilities, build_receiver_capabilities
@@ -135,13 +136,16 @@ class PioneerReceiver:
             on_connected=self._on_connected,
             on_disconnected=self._on_disconnected,
         )
+        self._info_refresh = InfoRefreshScheduler(self)
 
     async def start(self) -> None:
         """Start the persistent connection."""
         await self._connection.start()
+        await self._info_refresh.start()
 
     async def stop(self) -> None:
         """Stop the connection."""
+        await self._info_refresh.stop()
         await self._connection.stop()
 
     @property
@@ -152,6 +156,10 @@ class PioneerReceiver:
     def get_transport_diagnostics(self) -> dict[str, Any]:
         """Return transport lifecycle diagnostics."""
         return self._connection.get_diagnostics()
+
+    def get_info_refresh_diagnostics(self) -> dict[str, Any]:
+        """Return information refresh scheduler diagnostics."""
+        return self._info_refresh.get_diagnostics()
 
     def add_listener(self, event: asyncio.Event) -> None:
         """Register a listener notified on state changes."""
@@ -318,8 +326,7 @@ class PioneerReceiver:
         await self.send_raw(f"{CMD_LISTENING_MODE}{code.upper()}")
         await asyncio.sleep(0.15)
         await self.send_raw(f"{CMD_LISTENING_MODE}{QUERY_SUFFIX}")
-        await asyncio.sleep(0.15)
-        await self.query_audio_info()
+        await self._info_refresh.refresh_after_listening_mode_command()
 
     async def query_audio_info(self) -> None:
         """Request IFA audio information."""
@@ -365,9 +372,11 @@ class PioneerReceiver:
         self.state.connected = True
         self._notify_listeners()
         await self.query_startup_state()
+        await self._info_refresh.on_connected()
 
     async def _on_disconnected(self) -> None:
         self.state.connected = False
+        await self._info_refresh.on_disconnected()
         self._notify_listeners()
 
     def _update_main_volume(self, parameter: str) -> None:
@@ -392,9 +401,12 @@ class PioneerReceiver:
 
         if cmd == CMD_POWER:
             power = parse_power(param)
-            if power is not None and power != self.state.main.power:
-                self.state.main.power = power
-                changed = True
+            if power is not None:
+                previous = self.state.main.power
+                if power != previous:
+                    self.state.main.power = power
+                    changed = True
+                    await self._info_refresh.on_power_changed(previous, power)
 
         elif cmd == CMD_VOLUME:
             previous = self.state.main.volume_state.raw_parameter
@@ -413,6 +425,7 @@ class PioneerReceiver:
             if code is not None and code != self.state.main.input_code:
                 self.state.main.input_code = code
                 changed = True
+                self._info_refresh.on_source_changed()
 
         elif cmd == CMD_LISTENING_MODE:
             code = normalize_lmd_code(param) if param else None

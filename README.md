@@ -127,6 +127,8 @@ Entities use NRI-derived maps when available and fall back to static lists until
 
 The **Listening Mode** select shows the closest NRI **command family** (e.g. Pure Direct, Auto/Direct). The media player attribute `listening_mode` shows the **exact listening-mode state** from LMD/NRI/static mapping — **not** IFA decoder output. IFA `output_format` (e.g. Dolby Digital, Auto Surround) appears on the **Audio Output** sensor only.
 
+Core AVR controls (power, volume, mute, input, listening mode) update from receiver push messages. IFA/IFV snapshot information is refreshed on connect, power-on, source change, listening-mode commands, and every 60 seconds while powered on. NRI is not periodically polled.
+
 See [CHANGELOG.md](CHANGELOG.md) for version notes (including transport lifecycle diagnostics in 0.1.10).
 
 **Debug logging** (`configuration.yaml`):

@@ -42,18 +42,9 @@ class PioneerEiscpCoordinator(DataUpdateCoordinator[ReceiverState]):
     async def _async_update_data(self) -> ReceiverState:
         """Return current receiver state.
 
-        Primary updates arrive via unsolicited ISCP messages. This method
-        runs occasionally for recovery queries when connected.
+        Primary updates arrive via unsolicited ISCP messages. Periodic IFA/IFV
+        refresh is handled by the receiver information refresh scheduler.
         """
-        if self.receiver.connected:
-            # Light recovery: re-query audio/video info only.
-            try:
-                await self.receiver.query_audio_info()
-                await asyncio.sleep(0.1)
-                await self.receiver.query_video_info()
-            except ConnectionError:
-                _LOGGER.debug("Recovery query skipped (not connected)")
-
         return self.receiver.state
 
     async def async_listen(self) -> None:
@@ -106,6 +97,7 @@ class PioneerEiscpCoordinator(DataUpdateCoordinator[ReceiverState]):
             "port": self.receiver.port,
             "connected": self.receiver.connected,
             "transport": self.receiver.get_transport_diagnostics(),
+            "info_refresh": self.receiver.get_info_refresh_diagnostics(),
             "state": self.receiver.get_state_dict(),
             "capability_probe": self.receiver.capabilities.as_dict(),
             "receiver_capabilities": self.receiver.receiver_capabilities_model.as_dict(),

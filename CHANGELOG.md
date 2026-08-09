@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.15
+
+- Add conservative IFA/IFV information refresh: delayed refresh on power-on and source change, 60s periodic refresh while powered on; core controls remain push-driven; NRI not polled.
+
 ## 0.1.14
 
 - Separate listening mode from IFA audio output format; remove IFA fallback for `listening_mode`.

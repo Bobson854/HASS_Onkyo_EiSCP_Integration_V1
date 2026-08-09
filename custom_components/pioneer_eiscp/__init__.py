@@ -26,7 +26,7 @@ from .const import (
     normalize_port,
 )
 from .coordinator import PioneerEiscpCoordinator
-from .helpers import async_resolve_coordinator
+from .helpers import resolve_coordinator
 from .receiver import PioneerReceiver
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
     async def handle_send_raw(call: ServiceCall) -> None:
         command = call.data[ATTR_ISCP_COMMAND]
-        coordinator = await async_resolve_coordinator(hass, call)
+        coordinator = resolve_coordinator(hass, call)
         _LOGGER.debug(
             "Service send_raw for config entry %s: %s",
             coordinator.entry_id,
@@ -51,7 +51,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         await coordinator.async_send_raw(command)
 
     async def handle_probe_capabilities(call: ServiceCall) -> None:
-        coordinator = await async_resolve_coordinator(hass, call)
+        coordinator = resolve_coordinator(hass, call)
         _LOGGER.info(
             "Capability probe requested for config entry %s",
             coordinator.entry_id,

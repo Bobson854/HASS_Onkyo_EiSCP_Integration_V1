@@ -38,26 +38,16 @@ def _service_validation_to_home_assistant_error(err: ServiceValidationError) -> 
     return HomeAssistantError(str(err))
 
 
-async def async_resolve_coordinator(
+def resolve_coordinator(
     hass: HomeAssistant,
     call: ServiceCall,
     *,
     require_connected: bool = True,
 ) -> PioneerEiscpCoordinator:
     """Resolve the coordinator for a config-entry-level service call."""
-    entry_ids: set[str] = set()
-
-    if config_entry_id := call.data.get(ATTR_CONFIG_ENTRY):
-        entry_ids.add(config_entry_id)
-    if legacy_entry_id := call.data.get(ATTR_ENTRY_ID):
-        entry_ids.add(legacy_entry_id)
-
-    entry_ids.update(await service.async_extract_config_entry_ids(call))
-
-    if len(entry_ids) > 1:
-        raise HomeAssistantError(_MSG_MULTIPLE)
-
-    entry_id = next(iter(entry_ids)) if entry_ids else None
+    entry_id: str | None = call.data.get(ATTR_CONFIG_ENTRY)
+    if entry_id is None:
+        entry_id = call.data.get(ATTR_ENTRY_ID)
 
     try:
         config_entry = service.async_get_config_entry(hass, DOMAIN, entry_id)

@@ -42,7 +42,7 @@
         },
         "config_entry": {
           "name": "Receiver",
-          "description": "Pioneer eISCP config entry when multiple AVRs are configured."
+          "description": "Pioneer eISCP receiver to use. Optional when only one receiver is configured."
         }
       }
     },
@@ -52,7 +52,7 @@
       "fields": {
         "config_entry": {
           "name": "Receiver",
-          "description": "Pioneer eISCP config entry when multiple AVRs are configured."
+          "description": "Pioneer eISCP receiver to use. Optional when only one receiver is configured."
         }
       }
     }

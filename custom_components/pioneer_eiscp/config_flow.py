@@ -21,32 +21,41 @@ from .const import DEFAULT_MODEL, DEFAULT_NAME, DEFAULT_PORT, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
+# Plain text selector — accepts IPv4, IPv6, or hostname. Do not use a typed
+# host selector enum; it is not available on all supported HA versions.
+_HOST_SELECTOR = selector.TextSelector(selector.TextSelectorConfig())
 
-def _connection_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
-    """Build the host/port/name schema with optional defaults for reconfigure."""
-    defaults = defaults or {}
+
+def _connection_schema_initial() -> vol.Schema:
+    """Schema for first-time setup: host required with no default."""
     return vol.Schema(
         {
-            vol.Required(
-                CONF_HOST,
-                default=defaults.get(CONF_HOST),
-            ): selector.TextSelector(
-                selector.TextSelectorConfig(type=selector.TextSelectorType.HOST)
-            ),
-            vol.Required(
-                CONF_PORT,
-                default=defaults.get(CONF_PORT, DEFAULT_PORT),
-            ): selector.NumberSelector(
+            vol.Required(CONF_HOST): _HOST_SELECTOR,
+            vol.Required(CONF_PORT, default=DEFAULT_PORT): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=1,
                     max=65535,
                     mode=selector.NumberSelectorMode.BOX,
                 )
             ),
-            vol.Optional(
-                CONF_NAME,
-                default=defaults.get(CONF_NAME, DEFAULT_NAME),
-            ): str,
+            vol.Optional(CONF_NAME, default=DEFAULT_NAME): str,
+        }
+    )
+
+
+def _connection_schema_reconfigure(defaults: dict[str, Any]) -> vol.Schema:
+    """Schema for reconfigure: pre-fill existing host, port, and name."""
+    return vol.Schema(
+        {
+            vol.Required(CONF_HOST, default=defaults[CONF_HOST]): _HOST_SELECTOR,
+            vol.Required(CONF_PORT, default=defaults[CONF_PORT]): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1,
+                    max=65535,
+                    mode=selector.NumberSelectorMode.BOX,
+                )
+            ),
+            vol.Optional(CONF_NAME, default=defaults[CONF_NAME]): str,
         }
     )
 
@@ -67,6 +76,8 @@ class PioneerEiscpConfigFlow(ConfigFlow, domain=DOMAIN):
             port = user_input[CONF_PORT]
             name = user_input.get(CONF_NAME, DEFAULT_NAME)
 
+            # TODO: NRI/ECN discovery may expose a stable receiver identifier
+            # (e.g. network MAC-based id) to replace host:port as unique_id.
             await self.async_set_unique_id(f"{host}:{port}")
             self._abort_if_unique_id_configured()
 
@@ -84,7 +95,7 @@ class PioneerEiscpConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user",
-            data_schema=_connection_schema(),
+            data_schema=_connection_schema_initial(),
             errors=errors,
         )
 
@@ -101,7 +112,9 @@ class PioneerEiscpConfigFlow(ConfigFlow, domain=DOMAIN):
             name = user_input.get(CONF_NAME, DEFAULT_NAME)
             new_unique_id = f"{host}:{port}"
 
-            duplicate = _find_duplicate_entry(self.hass, DOMAIN, new_unique_id, reconfigure_entry.entry_id)
+            duplicate = _find_duplicate_entry(
+                self.hass, DOMAIN, new_unique_id, reconfigure_entry.entry_id
+            )
             if duplicate is not None:
                 errors["base"] = "already_configured"
             else:
@@ -127,7 +140,7 @@ class PioneerEiscpConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=_connection_schema(defaults),
+            data_schema=_connection_schema_reconfigure(defaults),
             errors=errors,
         )
 

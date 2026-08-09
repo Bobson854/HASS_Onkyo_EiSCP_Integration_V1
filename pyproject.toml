@@ -6,12 +6,13 @@ requires-python = ">=3.11"
 readme = "README.md"
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "voluptuous>=0.13"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-v"
+asyncio_mode = "auto"
 
 [tool.ruff]
 line-length = 100

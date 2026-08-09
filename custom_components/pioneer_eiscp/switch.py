@@ -11,7 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .coordinator import PioneerEiscpCoordinator
-from .entity import PioneerEiscpEntity
+from .entity import PioneerConnectedEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ async def async_setup_entry(
     async_add_entities([PioneerZone2PowerSwitch(coordinator, entry)])
 
 
-class PioneerZone2PowerSwitch(PioneerEiscpEntity, SwitchEntity):
+class PioneerZone2PowerSwitch(PioneerConnectedEntity, SwitchEntity):
     """Zone 2 power switch (ZPW) — architecture placeholder."""
 
     _attr_name = "Zone 2 Power"

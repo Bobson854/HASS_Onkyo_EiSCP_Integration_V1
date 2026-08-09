@@ -11,7 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, LISTENING_MODE_TO_CODE, LISTENING_MODES
 from .coordinator import PioneerEiscpCoordinator
-from .entity import PioneerEiscpEntity
+from .entity import PioneerConnectedEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ async def async_setup_entry(
     )
 
 
-class PioneerListeningModeSelect(PioneerEiscpEntity, SelectEntity):
+class PioneerListeningModeSelect(PioneerConnectedEntity, SelectEntity):
     """Listening mode select entity (LMD)."""
 
     _attr_name = "Listening Mode"
@@ -64,7 +64,7 @@ class PioneerListeningModeSelect(PioneerEiscpEntity, SelectEntity):
         await self.coordinator.receiver.set_listening_mode(code)
 
 
-class PioneerHdmiOutputSelect(PioneerEiscpEntity, SelectEntity):
+class PioneerHdmiOutputSelect(PioneerConnectedEntity, SelectEntity):
     """HDMI output selection (HDO) — architecture placeholder.
 
     Options will be populated from receiver responses in a future pass.

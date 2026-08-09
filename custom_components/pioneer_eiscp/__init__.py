@@ -12,8 +12,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.selector import ConfigEntrySelector
 
 from .const import (
+    ATTR_CONFIG_ENTRY,
     ATTR_ENTRY_ID,
     ATTR_ISCP_COMMAND,
     DEFAULT_PORT,
@@ -24,7 +26,7 @@ from .const import (
     normalize_port,
 )
 from .coordinator import PioneerEiscpCoordinator
-from .helpers import resolve_coordinator
+from .helpers import async_resolve_coordinator
 from .receiver import PioneerReceiver
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,21 +42,20 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
     async def handle_send_raw(call: ServiceCall) -> None:
         command = call.data[ATTR_ISCP_COMMAND]
-        coordinator = resolve_coordinator(hass, call)
-        if not coordinator:
-            _LOGGER.warning("No pioneer_eiscp coordinator matched for send_raw")
-            return
-        _LOGGER.debug("Service send_raw: %s", command)
+        coordinator = await async_resolve_coordinator(hass, call)
+        _LOGGER.debug(
+            "Service send_raw for config entry %s: %s",
+            coordinator.entry_id,
+            command,
+        )
         await coordinator.async_send_raw(command)
 
     async def handle_probe_capabilities(call: ServiceCall) -> None:
-        coordinator = resolve_coordinator(hass, call)
-        if not coordinator:
-            _LOGGER.warning("No pioneer_eiscp coordinator matched for probe_capabilities")
-            return
-        if not coordinator.receiver.connected:
-            _LOGGER.warning("Capability probe skipped: receiver not connected")
-            return
+        coordinator = await async_resolve_coordinator(hass, call)
+        _LOGGER.info(
+            "Capability probe requested for config entry %s",
+            coordinator.entry_id,
+        )
         await coordinator.async_probe_capabilities()
 
     hass.services.async_register(
@@ -64,6 +65,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         schema=vol.Schema(
             {
                 vol.Required(ATTR_ISCP_COMMAND): str,
+                vol.Optional(ATTR_CONFIG_ENTRY): ConfigEntrySelector(
+                    {"integration": DOMAIN}
+                ),
                 vol.Optional(ATTR_ENTRY_ID): str,
             }
         ),
@@ -74,7 +78,14 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         DOMAIN,
         SERVICE_PROBE_CAPABILITIES,
         handle_probe_capabilities,
-        schema=vol.Schema({vol.Optional(ATTR_ENTRY_ID): str}),
+        schema=vol.Schema(
+            {
+                vol.Optional(ATTR_CONFIG_ENTRY): ConfigEntrySelector(
+                    {"integration": DOMAIN}
+                ),
+                vol.Optional(ATTR_ENTRY_ID): str,
+            }
+        ),
         supports_response=False,
     )
 

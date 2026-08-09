@@ -40,9 +40,9 @@
           "name": "ISCP command",
           "description": "Raw ISCP body, e.g. IFAQSTN, LMDQSTN, MVL14."
         },
-        "entry_id": {
-          "name": "Config entry ID",
-          "description": "Optional config entry when multiple AVRs are configured."
+        "config_entry": {
+          "name": "Receiver",
+          "description": "Pioneer eISCP config entry when multiple AVRs are configured."
         }
       }
     },
@@ -50,9 +50,9 @@
       "name": "Probe receiver capabilities",
       "description": "Run read-only eISCP queries and store results in diagnostics.",
       "fields": {
-        "entry_id": {
-          "name": "Config entry ID",
-          "description": "Optional config entry when multiple AVRs are configured."
+        "config_entry": {
+          "name": "Receiver",
+          "description": "Pioneer eISCP config entry when multiple AVRs are configured."
         }
       }
     }

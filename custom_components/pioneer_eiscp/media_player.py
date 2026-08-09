@@ -17,7 +17,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, INPUT_SOURCES, INPUT_SOURCE_TO_CODE
 from .coordinator import PioneerEiscpCoordinator
-from .entity import PioneerEiscpEntity
+from .entity import PioneerConnectedEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ async def async_setup_entry(
     async_add_entities([PioneerMainZoneMediaPlayer(coordinator, entry)])
 
 
-class PioneerMainZoneMediaPlayer(PioneerEiscpEntity, MediaPlayerEntity):
+class PioneerMainZoneMediaPlayer(PioneerConnectedEntity, MediaPlayerEntity):
     """Main zone media player entity."""
 
     _attr_device_class = MediaPlayerDeviceClass.RECEIVER
@@ -58,8 +58,6 @@ class PioneerMainZoneMediaPlayer(PioneerEiscpEntity, MediaPlayerEntity):
     @property
     def state(self) -> MediaPlayerState:
         """Return the state of the device."""
-        if not self.coordinator.receiver.connected:
-            return MediaPlayerState.UNAVAILABLE
         power = self.coordinator.data.main.power
         if power is True:
             return MediaPlayerState.ON

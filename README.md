@@ -96,11 +96,11 @@ Run a **read-only** capability probe to capture what your receiver reports (incl
 
 ```yaml
 service: pioneer_eiscp.probe_capabilities
-target:
-  device_id: your_pioneer_device_id
+data:
+  config_entry: your_pioneer_config_entry_id
 ```
 
-Or from Developer Tools without a target when only one AVR is configured.
+In **Developer Tools → Actions**, use the **Receiver** dropdown (config entry selector) when multiple AVRs exist. With a single configured receiver, you can run the action without selecting one.
 
 The probe:
 

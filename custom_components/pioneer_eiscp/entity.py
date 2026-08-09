@@ -31,3 +31,12 @@ class PioneerEiscpEntity(CoordinatorEntity[PioneerEiscpCoordinator]):
             model=entry.data.get("model", "VSX-1131"),
             name=coordinator.device_name,
         )
+
+
+class PioneerConnectedEntity(PioneerEiscpEntity):
+    """Entity unavailable when the persistent receiver connection is down."""
+
+    @property
+    def available(self) -> bool:
+        """Return True when the receiver TCP session is connected."""
+        return self.coordinator.receiver.connected

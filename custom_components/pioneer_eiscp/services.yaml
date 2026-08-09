@@ -1,6 +1,7 @@
 send_raw:
   name: Send raw ISCP command
   description: Send a low-level ISCP command body to the receiver (engineering/testing).
+  target:
   fields:
     iscp_command:
       name: ISCP command
@@ -9,20 +10,23 @@ send_raw:
       example: IFAQSTN
       selector:
         text:
-    entry_id:
-      name: Config entry ID
-      description: Optional config entry when multiple AVRs are configured.
+    config_entry:
+      name: Receiver
+      description: Pioneer eISCP config entry when multiple AVRs are configured.
       required: false
       selector:
-        text:
+        config_entry:
+          integration: pioneer_eiscp
 
 probe_capabilities:
   name: Probe receiver capabilities
   description: Run read-only eISCP queries and store results in diagnostics.
+  target:
   fields:
-    entry_id:
-      name: Config entry ID
-      description: Optional config entry when multiple AVRs are configured.
+    config_entry:
+      name: Receiver
+      description: Pioneer eISCP config entry when multiple AVRs are configured.
       required: false
       selector:
-        text:
+        config_entry:
+          integration: pioneer_eiscp

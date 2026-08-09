@@ -156,3 +156,21 @@ class TestValidateEiscpReceiver:
                 cv.validate_eiscp_receiver("192.0.2.10", 60128)
 
         assert exc_info.value.stage == cv.STAGE_RECV
+
+    def test_float_port_normalized_before_connect(self) -> None:
+        with patch.object(cv.socket, "create_connection") as mock_connect:
+            mock_connect.side_effect = OSError("Connection refused")
+            with pytest.raises(cv.EiscpConnectionError):
+                cv.validate_eiscp_receiver("192.0.2.10", 60128.0)
+
+        mock_connect.assert_called_once_with(("192.0.2.10", 60128), timeout=cv.VALIDATION_TIMEOUT)
+        _args, _kwargs = mock_connect.call_args
+        assert isinstance(_args[0][1], int)
+
+    def test_invalid_port_rejected_before_connect(self) -> None:
+        with patch.object(cv.socket, "create_connection") as mock_connect:
+            with pytest.raises(cv.EiscpConnectionError) as exc_info:
+                cv.validate_eiscp_receiver("192.0.2.10", 70000)
+
+        mock_connect.assert_not_called()
+        assert exc_info.value.stage == cv.STAGE_CONNECT

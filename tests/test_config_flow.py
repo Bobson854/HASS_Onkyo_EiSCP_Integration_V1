@@ -243,3 +243,79 @@ class TestAsyncStepUserOpensForm:
         assert result["step_id"] == "user"
         assert result["data_schema"] is not None
         flow.hass.async_add_executor_job.assert_not_called()
+
+
+class TestPortNormalization:
+    """Home Assistant NumberSelector returns float ports (e.g. 60128.0)."""
+
+    USER_INPUT = {
+        CONF_HOST: "192.0.2.10",
+        CONF_PORT: 60128.0,
+        CONF_NAME: "Test AVR",
+    }
+
+    @pytest.mark.asyncio
+    async def test_user_step_normalizes_float_port_for_validation(self) -> None:
+        flow = cf.PioneerEiscpConfigFlow()
+        captured: dict[str, Any] = {}
+
+        async def capture_validate(host: str, port: int) -> dict[str, str]:
+            captured["host"] = host
+            captured["port"] = port
+            return {"base": "cannot_connect"}
+
+        flow._async_validate_receiver = capture_validate  # type: ignore[method-assign]
+        flow.async_set_unique_id = AsyncMock()
+        flow._abort_if_unique_id_configured = MagicMock()
+
+        await flow.async_step_user(user_input=dict(self.USER_INPUT))
+
+        assert captured["port"] == 60128
+        assert isinstance(captured["port"], int)
+        flow.async_set_unique_id.assert_awaited_once_with("192.0.2.10:60128")
+        uid = flow.async_set_unique_id.await_args.args[0]
+        assert uid == "192.0.2.10:60128"
+        assert uid.endswith(":60128")
+        assert ":60128.0" not in uid
+
+    @pytest.mark.asyncio
+    async def test_user_step_stores_int_port_in_config_entry(self) -> None:
+        flow = cf.PioneerEiscpConfigFlow()
+        flow._async_validate_receiver = AsyncMock(return_value={})
+        flow.async_set_unique_id = AsyncMock()
+        flow._abort_if_unique_id_configured = MagicMock()
+
+        result = await flow.async_step_user(user_input=dict(self.USER_INPUT))
+
+        assert result["type"] == "create_entry"
+        assert result["data"][CONF_PORT] == 60128
+        assert isinstance(result["data"][CONF_PORT], int)
+
+    @pytest.mark.asyncio
+    async def test_reconfigure_normalizes_float_port(self) -> None:
+        flow = cf.PioneerEiscpConfigFlow()
+        entry = MagicMock()
+        entry.entry_id = "entry-1"
+        entry.data = {
+            CONF_HOST: "192.0.2.20",
+            CONF_PORT: 60128,
+            CONF_NAME: "Old Name",
+        }
+        entry.title = "Old Name"
+        flow._get_reconfigure_entry = MagicMock(return_value=entry)
+        flow.hass.config_entries.async_entries = MagicMock(return_value=[])
+        flow._async_validate_receiver = AsyncMock(return_value={})
+        flow.async_set_unique_id = AsyncMock()
+
+        result = await flow.async_step_reconfigure(
+            user_input={
+                CONF_HOST: "192.0.2.20",
+                CONF_PORT: 60128.0,
+                CONF_NAME: "New Name",
+            }
+        )
+
+        assert result["type"] == "update_reload_and_abort"
+        assert result["data_updates"][CONF_PORT] == 60128
+        assert isinstance(result["data_updates"][CONF_PORT], int)
+        flow.async_set_unique_id.assert_awaited_once_with("192.0.2.20:60128")

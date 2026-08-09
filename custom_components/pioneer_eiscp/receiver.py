@@ -22,6 +22,7 @@ from .const import (
     LISTENING_MODES,
     QUERY_SUFFIX,
     STARTUP_QUERIES,
+    normalize_port,
 )
 from .protocol.framing import EiscpFrame
 from .protocol.parsers import (
@@ -92,9 +93,9 @@ class ReceiverState:
 class PioneerReceiver:
     """High-level receiver interface over eISCP transport."""
 
-    def __init__(self, host: str, port: int) -> None:
+    def __init__(self, host: str, port: int | float | str) -> None:
         self.host = host
-        self.port = port
+        self.port = normalize_port(port)
         self.state = ReceiverState()
         self._listeners: list[asyncio.Event] = []
         self._connection = EiscpConnection(

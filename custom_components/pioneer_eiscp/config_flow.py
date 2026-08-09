@@ -17,7 +17,7 @@ from .config_validation import (
     EiscpValidationError,
     validate_eiscp_receiver,
 )
-from .const import DEFAULT_MODEL, DEFAULT_NAME, DEFAULT_PORT, DOMAIN
+from .const import DEFAULT_MODEL, DEFAULT_NAME, DEFAULT_PORT, DOMAIN, normalize_port
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -73,25 +73,30 @@ class PioneerEiscpConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             host = user_input[CONF_HOST]
-            port = user_input[CONF_PORT]
             name = user_input.get(CONF_NAME, DEFAULT_NAME)
 
-            # TODO: NRI/ECN discovery may expose a stable receiver identifier
-            # (e.g. network MAC-based id) to replace host:port as unique_id.
-            await self.async_set_unique_id(f"{host}:{port}")
-            self._abort_if_unique_id_configured()
+            try:
+                port = normalize_port(user_input[CONF_PORT])
+            except ValueError as err:
+                _LOGGER.warning("Invalid port in setup for %s: %s", host, err)
+                errors["base"] = "unknown"
+            else:
+                # TODO: NRI/ECN discovery may expose a stable receiver identifier
+                # (e.g. network MAC-based id) to replace host:port as unique_id.
+                await self.async_set_unique_id(f"{host}:{port}")
+                self._abort_if_unique_id_configured()
 
-            errors = await self._async_validate_receiver(host, port)
-            if not errors:
-                return self.async_create_entry(
-                    title=name,
-                    data={
-                        CONF_HOST: host,
-                        CONF_PORT: port,
-                        CONF_NAME: name,
-                        "model": DEFAULT_MODEL,
-                    },
-                )
+                errors = await self._async_validate_receiver(host, port)
+                if not errors:
+                    return self.async_create_entry(
+                        title=name,
+                        data={
+                            CONF_HOST: host,
+                            CONF_PORT: port,
+                            CONF_NAME: name,
+                            "model": DEFAULT_MODEL,
+                        },
+                    )
 
         return self.async_show_form(
             step_id="user",
@@ -108,33 +113,41 @@ class PioneerEiscpConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             host = user_input[CONF_HOST]
-            port = user_input[CONF_PORT]
             name = user_input.get(CONF_NAME, DEFAULT_NAME)
-            new_unique_id = f"{host}:{port}"
 
-            duplicate = _find_duplicate_entry(
-                self.hass, DOMAIN, new_unique_id, reconfigure_entry.entry_id
-            )
-            if duplicate is not None:
-                errors["base"] = "already_configured"
+            try:
+                port = normalize_port(user_input[CONF_PORT])
+            except ValueError as err:
+                _LOGGER.warning("Invalid port in reconfigure for %s: %s", host, err)
+                errors["base"] = "unknown"
             else:
-                errors = await self._async_validate_receiver(host, port)
+                new_unique_id = f"{host}:{port}"
 
-            if not errors:
-                await self.async_set_unique_id(new_unique_id)
-                return self.async_update_reload_and_abort(
-                    reconfigure_entry,
-                    title=name,
-                    data_updates={
-                        CONF_HOST: host,
-                        CONF_PORT: port,
-                        CONF_NAME: name,
-                    },
+                duplicate = _find_duplicate_entry(
+                    self.hass, DOMAIN, new_unique_id, reconfigure_entry.entry_id
                 )
+                if duplicate is not None:
+                    errors["base"] = "already_configured"
+                else:
+                    errors = await self._async_validate_receiver(host, port)
+
+                if not errors:
+                    await self.async_set_unique_id(new_unique_id)
+                    return self.async_update_reload_and_abort(
+                        reconfigure_entry,
+                        title=name,
+                        data_updates={
+                            CONF_HOST: host,
+                            CONF_PORT: port,
+                            CONF_NAME: name,
+                        },
+                    )
 
         defaults = {
             CONF_HOST: reconfigure_entry.data[CONF_HOST],
-            CONF_PORT: reconfigure_entry.data.get(CONF_PORT, DEFAULT_PORT),
+            CONF_PORT: normalize_port(
+                reconfigure_entry.data.get(CONF_PORT, DEFAULT_PORT)
+            ),
             CONF_NAME: reconfigure_entry.data.get(CONF_NAME, reconfigure_entry.title),
         }
 

@@ -19,6 +19,7 @@ from .const import (
     DOMAIN,
     PLATFORMS,
     SERVICE_SEND_RAW,
+    normalize_port,
 )
 from .coordinator import PioneerEiscpCoordinator
 from .receiver import PioneerReceiver
@@ -63,7 +64,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: PioneerEiscpConfigEntry) -> bool:
     """Set up Pioneer eISCP from a config entry."""
     host = entry.data[CONF_HOST]
-    port = entry.data.get(CONF_PORT, DEFAULT_PORT)
+    port = normalize_port(entry.data.get(CONF_PORT, DEFAULT_PORT))
     name = entry.data.get(CONF_NAME, entry.title)
 
     receiver = PioneerReceiver(host, port)

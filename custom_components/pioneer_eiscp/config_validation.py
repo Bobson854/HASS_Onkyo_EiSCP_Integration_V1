@@ -7,7 +7,13 @@ import socket
 import time
 from typing import Final
 
-from .const import CMD_POWER, QUERY_SUFFIX, VALIDATION_READ_TIMEOUT, VALIDATION_TIMEOUT
+from .const import (
+    CMD_POWER,
+    QUERY_SUFFIX,
+    VALIDATION_READ_TIMEOUT,
+    VALIDATION_TIMEOUT,
+    normalize_port,
+)
 from .protocol.framing import EiscpFrame, build_packet, parse_packets
 
 _LOGGER = logging.getLogger(__name__)
@@ -68,7 +74,7 @@ def _log_tx_query(host: str, port: int) -> None:
 
 def validate_eiscp_receiver(
     host: str,
-    port: int,
+    port: int | float | str,
     *,
     connect_timeout: float = VALIDATION_TIMEOUT,
     read_timeout: float = VALIDATION_READ_TIMEOUT,
@@ -89,6 +95,12 @@ def validate_eiscp_receiver(
     buffer = b""
 
     try:
+        try:
+            port = normalize_port(port)
+        except ValueError as err:
+            msg = f"Invalid port: {err}"
+            raise EiscpConnectionError(msg, stage=STAGE_CONNECT) from err
+
         try:
             sock = socket.create_connection((host, port), timeout=connect_timeout)
         except OSError as err:

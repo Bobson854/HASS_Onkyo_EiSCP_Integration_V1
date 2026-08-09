@@ -11,6 +11,25 @@ DEFAULT_PORT = 60128
 DEFAULT_NAME = "Pioneer AVR"
 DEFAULT_MODEL = "VSX-1131"
 
+PORT_MIN = 1
+PORT_MAX = 65535
+
+
+def normalize_port(port: int | float | str) -> int:
+    """Convert config-flow or legacy entry port values to a valid TCP port int.
+
+    Home Assistant NumberSelector commonly returns floats (e.g. 60128.0).
+    """
+    try:
+        value = int(port)
+    except (TypeError, ValueError) as err:
+        msg = f"Invalid port: {port!r}"
+        raise ValueError(msg) from err
+    if not PORT_MIN <= value <= PORT_MAX:
+        msg = f"Port out of range: {value}"
+        raise ValueError(msg)
+    return value
+
 CONNECT_TIMEOUT = 10.0
 READ_TIMEOUT = 30.0
 RECONNECT_INTERVAL = 30.0

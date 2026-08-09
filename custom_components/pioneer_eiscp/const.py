@@ -16,6 +16,10 @@ READ_TIMEOUT = 30.0
 RECONNECT_INTERVAL = 30.0
 RECOVERY_QUERY_INTERVAL = 300.0
 
+# Setup-time validation (read-only PWRQSTN probe)
+VALIDATION_TIMEOUT = 10.0
+VALIDATION_READ_TIMEOUT = 5.0
+
 # ISCP command prefixes (3-letter codes)
 CMD_POWER = "PWR"
 CMD_VOLUME = "MVL"

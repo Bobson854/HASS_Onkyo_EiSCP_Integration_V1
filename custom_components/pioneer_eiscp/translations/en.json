@@ -9,14 +9,26 @@
           "port": "Port",
           "name": "Name"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Pioneer eISCP",
+        "description": "Update the receiver connection settings. The integration will reconnect using the new address.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "name": "Name"
+        }
       }
     },
     "error": {
       "cannot_connect": "Failed to connect to the receiver.",
+      "invalid_response": "The device did not respond with a valid eISCP message.",
+      "already_configured": "This receiver is already configured.",
       "unknown": "Unexpected error occurred."
     },
     "abort": {
-      "already_configured": "Device is already configured."
+      "already_configured": "This receiver is already configured.",
+      "reconfigure_successful": "Configuration updated successfully."
     }
   },
   "services": {

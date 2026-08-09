@@ -58,15 +58,21 @@ This repository is structured for HACS custom-repository installation once publi
 
 ## Configuration
 
-During setup you provide:
+Add the integration via **Settings → Devices & Services → Add Integration → Pioneer eISCP**.
+
+Enter your receiver details in the setup form (no YAML or external config file is required):
 
 | Field | Description |
 |-------|-------------|
-| **Host** | Receiver IP address or hostname |
+| **Host** | Receiver IP address or hostname (required; no default) |
 | **Port** | eISCP TCP port (default `60128`) |
 | **Name** | Friendly device name in Home Assistant |
 
-Example host: `192.0.2.10` (use your receiver’s address).
+Example host: `192.0.2.10` (replace with your receiver’s address).
+
+During setup the integration sends a read-only **PWRQSTN** query to confirm the target responds as an eISCP receiver before creating the config entry.
+
+To change host, port, or name later: **Settings → Devices & Services → Pioneer eISCP → Configure**.
 
 Ensure **Network Control** (or equivalent IP control setting) is enabled on the AVR.
 

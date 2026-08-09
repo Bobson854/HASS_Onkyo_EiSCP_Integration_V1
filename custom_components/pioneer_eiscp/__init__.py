@@ -10,7 +10,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.selector import ConfigEntrySelector
 
@@ -50,13 +50,13 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
         )
         await coordinator.async_send_raw(command)
 
-    async def handle_probe_capabilities(call: ServiceCall) -> None:
+    async def handle_probe_capabilities(call: ServiceCall) -> ServiceResponse:
         coordinator = resolve_coordinator(hass, call)
         _LOGGER.info(
             "Capability probe requested for config entry %s",
             coordinator.entry_id,
         )
-        await coordinator.async_probe_capabilities()
+        return await coordinator.async_probe_capabilities()
 
     hass.services.async_register(
         DOMAIN,
@@ -71,7 +71,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                 vol.Optional(ATTR_ENTRY_ID): str,
             }
         ),
-        supports_response=False,
+        supports_response=SupportsResponse.NONE,
     )
 
     hass.services.async_register(
@@ -86,7 +86,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
                 vol.Optional(ATTR_ENTRY_ID): str,
             }
         ),
-        supports_response=False,
+        supports_response=SupportsResponse.ONLY,
     )
 
     return True

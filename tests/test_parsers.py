@@ -58,20 +58,21 @@ class TestParseAudioInformation:
 class TestParseVideoInformation:
     """IFV video-information parsing."""
 
-    def test_basic_ifv(self) -> None:
-        """Parse a representative IFV string."""
-        param = "HDMI 1,HDMI OUT,1080p,RGB,8 bit,ON,SDR,16:9"
+    def test_preserves_positional_fields_only(self) -> None:
+        param = "No Video,Unknown,,24bit,MAIN,1920 x 1080p,RGB,24bit,,"
         video = parse_video_information(param)
 
-        assert video.video_input == "HDMI 1"
-        assert video.resolution == "1080p"
         assert video.raw == param
+        assert video.fields[0] == "No Video"
+        assert video.fields[4] == "MAIN"
+        assert video.fields[5] == "1920 x 1080p"
+        assert not hasattr(video, "color_depth")
 
-    def test_truncated_ifv(self) -> None:
-        """Truncated IFV tolerates missing fields."""
-        video = parse_video_information("HDMI 2")
-        assert video.video_input == "HDMI 2"
-        assert video.resolution is None
+    def test_no_semantic_field_mapping(self) -> None:
+        video = parse_video_information("HDMI 1,HDMI OUT,1080p")
+        payload = video.as_dict()
+        assert "video_input" not in payload
+        assert payload["fields"] == ["HDMI 1", "HDMI OUT", "1080p"]
 
 
 class TestBasicResponseParsers:
@@ -85,7 +86,7 @@ class TestBasicResponseParsers:
         assert parse_mute("00") is False
         assert parse_mute("01") is True
 
-    def test_volume_hex(self) -> None:
-        assert parse_volume_hex("14") == 20
-        assert parse_volume_hex("64") == 100
+    def test_volume_decimal_absolute(self) -> None:
+        assert parse_volume_hex("52") == 52
+        assert parse_volume_hex("14") == 14
         assert parse_volume_hex("ZZ") is None

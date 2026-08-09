@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import DOMAIN, RECOVERY_QUERY_INTERVAL
+from .protocol.capability_probe import CapabilitySnapshot
 from .receiver import PioneerReceiver, ReceiverState
 
 _LOGGER = logging.getLogger(__name__)
@@ -66,10 +67,37 @@ class PioneerEiscpCoordinator(DataUpdateCoordinator[ReceiverState]):
         """Send a raw ISCP command through the receiver."""
         await self.receiver.send_raw(iscp_command)
 
-    async def async_probe_capabilities(self) -> None:
-        """Run capability probe and refresh coordinator state."""
-        await self.receiver.probe_capabilities()
+    async def async_probe_capabilities(self) -> dict[str, Any]:
+        """Run capability probe, refresh coordinator state, return snapshot."""
+        snapshot = await self.receiver.probe_capabilities()
         self.async_set_updated_data(self.receiver.state)
+        return self.probe_service_response(snapshot)
+
+    @staticmethod
+    def build_probe_service_response(snapshot: CapabilitySnapshot) -> dict[str, Any]:
+        """Build a JSON-serializable Developer Tools / service response payload."""
+        capability_probe = snapshot.as_dict()
+        responses = capability_probe.get("responses", {})
+        response_count = sum(
+            1 for record in responses.values() if not record.get("timed_out")
+        )
+        return {
+            "config_entry_id": None,
+            "receiver_name": None,
+            "summary": {
+                "responses": response_count,
+                "timeouts": len(capability_probe.get("timeouts", [])),
+                "parse_errors": len(capability_probe.get("parse_errors", [])),
+            },
+            "capability_probe": capability_probe,
+        }
+
+    def probe_service_response(self, snapshot: CapabilitySnapshot) -> dict[str, Any]:
+        """Build probe service response including coordinator identity fields."""
+        response = self.build_probe_service_response(snapshot)
+        response["config_entry_id"] = self.entry_id
+        response["receiver_name"] = self.device_name
+        return response
 
     def get_diagnostics(self) -> dict[str, Any]:
         """Return diagnostic payload."""
@@ -79,4 +107,5 @@ class PioneerEiscpCoordinator(DataUpdateCoordinator[ReceiverState]):
             "connected": self.receiver.connected,
             "state": self.receiver.state.as_dict(),
             "capability_probe": self.receiver.capabilities.as_dict(),
+            "receiver_capabilities": self.receiver.receiver_capabilities_model.as_dict(),
         }

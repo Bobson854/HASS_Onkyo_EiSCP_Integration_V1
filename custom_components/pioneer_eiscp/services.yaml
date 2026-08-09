@@ -19,7 +19,7 @@ send_raw:
 
 probe_capabilities:
   name: Probe receiver capabilities
-  description: Run read-only eISCP queries and store results in diagnostics.
+  description: Run read-only eISCP queries and return capability data for immediate inspection and diagnostics storage.
   fields:
     config_entry:
       name: Receiver

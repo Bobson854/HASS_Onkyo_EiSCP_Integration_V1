@@ -27,12 +27,13 @@ Initial development and testing target the **Pioneer VSX-1131**. Newer Pioneer r
 | Main zone media player | Working |
 | IFA audio information | Working |
 | IFV video information | Parser ready; limited entity exposure |
-| Listening mode | Working (static mode list) |
-| Input sources | Static list (not yet from receiver NRI) |
+| Listening mode | Working (NRI capability list when probed; static fallback) |
+| Input sources | Dynamic from NRI when probed; static fallback before probe |
+| Volume | Absolute decimal MVL with NRI `volmax` reference when available |
 | HDMI output select | Placeholder (disabled by default) |
-| Zone 2 | Power switch placeholder (disabled by default) |
+| Zone 2 | Capability detected from NRI; entities not implemented yet |
 | HACS default store | Not submitted |
-| NRI / dynamic discovery | Not implemented |
+| NRI / dynamic discovery | Implemented via capability probe |
 
 ## Installation
 
@@ -100,6 +101,8 @@ service: pioneer_eiscp.probe_capabilities
 
 In **Developer Tools → Actions**, use the **Receiver** dropdown when multiple AVRs exist, or leave it blank when only one receiver is configured. Do not use **Add target** (device/entity targeting is not supported for this action).
 
+On success, Developer Tools shows a JSON response with `summary` and full `capability_probe` data. The same snapshot is also stored in device diagnostics.
+
 The probe:
 
 - sends read-only `QSTN` queries sequentially (PWR, MVL, AMT, SLI, LMD, IFA, IFV, NRI)
@@ -108,6 +111,19 @@ The probe:
 - does **not** automatically create Home Assistant entities from responses
 
 Use this to improve model-specific support before hard-coding volume ranges, sources, or modes.
+
+### Dynamic capabilities (NRI)
+
+After a successful probe, supported receivers can expose **NRI** (Network Remote Information) data used internally for:
+
+- input selectors (`selectorlist`)
+- main-zone volume reference/range (`volmax`, `volstep`)
+- listening-mode capabilities (`controllist`)
+- receiver identity (model, firmware, serial)
+- tone/control ranges and feature flags
+- zone presence (for example Zone 2)
+
+Entities use NRI-derived maps when available and fall back to static lists until the first successful probe. Device registry identifiers still use `host:port`; a future migration may adopt the receiver serial from NRI.
 
 **Debug logging** (`configuration.yaml`):
 

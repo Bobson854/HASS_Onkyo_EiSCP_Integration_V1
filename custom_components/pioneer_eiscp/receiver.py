@@ -19,6 +19,7 @@ from .const import (
     CMD_ZONE2_POWER,
     CMD_ZONE2_VOLUME,
     INPUT_SOURCES,
+    INPUT_SOURCE_TO_CODE,
     LISTENING_MODES,
     QUERY_SUFFIX,
     STARTUP_QUERIES,
@@ -26,6 +27,7 @@ from .const import (
 )
 from .protocol.framing import EiscpFrame
 from .protocol.capability_probe import CapabilitySnapshot, run_capability_probe
+from .protocol.nri_capabilities import ReceiverCapabilities, build_receiver_capabilities
 from .protocol.parsers import (
     AudioInformation,
     VideoInformation,
@@ -34,9 +36,9 @@ from .protocol.parsers import (
     parse_mute,
     parse_power,
     parse_video_information,
-    parse_volume_hex,
 )
 from .protocol.transport import EiscpConnection
+from .protocol.volume import VolumeState, build_volume_state, format_mvl_parameter
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,6 +51,7 @@ class ZoneState:
     volume: int | None = None
     mute: bool | None = None
     input_code: str | None = None
+    volume_state: VolumeState = field(default_factory=VolumeState)
 
 
 @dataclass
@@ -65,17 +68,22 @@ class ReceiverState:
     raw_commands: dict[str, str] = field(default_factory=dict)
     connected: bool = False
     capability_probe: dict[str, Any] = field(default_factory=dict)
+    receiver_capabilities: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         """Return full internal state for diagnostics."""
+        input_map = INPUT_SOURCES
         return {
             "connected": self.connected,
             "main": {
                 "power": self.main.power,
                 "volume": self.main.volume,
+                "volume_raw": self.main.volume_state.raw_parameter,
+                "volume_reference": self.main.volume_state.volume_reference,
+                "volume_db": self.main.volume_state.volume_db,
                 "mute": self.main.mute,
                 "input_code": self.main.input_code,
-                "input_name": INPUT_SOURCES.get(self.main.input_code or "", "unknown"),
+                "input_name": input_map.get(self.main.input_code or "", "unknown"),
             },
             "zone2": {
                 "power": self.zone2.power,
@@ -90,6 +98,7 @@ class ReceiverState:
             "video": self.video.as_dict(),
             "raw_commands": dict(self.raw_commands),
             "capability_probe": self.capability_probe,
+            "receiver_capabilities": self.receiver_capabilities,
         }
 
 
@@ -104,6 +113,7 @@ class PioneerReceiver:
         self._probe_waiters: dict[str, asyncio.Future[EiscpFrame]] = {}
         self._probe_lock = asyncio.Lock()
         self.capabilities = CapabilitySnapshot()
+        self.receiver_capabilities_model = ReceiverCapabilities()
         self._connection = EiscpConnection(
             host,
             port,
@@ -157,9 +167,59 @@ class PioneerReceiver:
         await self.send_raw(f"{CMD_POWER}{'01' if on else '00'}")
 
     async def set_volume(self, level: int) -> None:
-        """Set main zone volume (0-100)."""
-        level = max(0, min(100, level))
-        await self.send_raw(f"{CMD_VOLUME}{level:02X}")
+        """Set main zone absolute volume using decimal MVL parameter."""
+        reference = self.volume_reference or 100
+        absolute = max(0, min(reference, level))
+        await self.send_raw(f"{CMD_VOLUME}{format_mvl_parameter(absolute)}")
+
+    async def set_volume_level(self, volume_level: float) -> None:
+        """Set main zone volume from Home Assistant 0..1 level."""
+        reference = self.volume_reference or 100
+        absolute = round(max(0.0, min(1.0, volume_level)) * reference)
+        await self.set_volume(absolute)
+
+    @property
+    def volume_reference(self) -> int | None:
+        """Return NRI-derived main-zone volume reference when available."""
+        return self.receiver_capabilities_model.volume_reference
+
+    def get_input_source_map(self) -> dict[str, str]:
+        """Return code->name input map from NRI or static fallback."""
+        nri_map = self.receiver_capabilities_model.input_source_map()
+        return nri_map if nri_map else dict(INPUT_SOURCES)
+
+    def get_input_source_reverse_map(self) -> dict[str, str]:
+        """Return name->code input map from NRI or static fallback."""
+        nri_map = self.receiver_capabilities_model.input_source_reverse_map()
+        return nri_map if nri_map else dict(INPUT_SOURCE_TO_CODE)
+
+    def get_listening_mode_map(self) -> dict[str, str]:
+        """Return display name->code listening-mode map from NRI or static fallback."""
+        nri_map = self.receiver_capabilities_model.listening_mode_map()
+        if nri_map:
+            return nri_map
+        return {name: code for code, name in LISTENING_MODES.items()}
+
+    def resolve_listening_mode_name(self, code: str | None) -> str | None:
+        """Resolve an LMD response code to a display name."""
+        if not code:
+            return None
+        nri_name = self.receiver_capabilities_model.resolve_listening_mode_name(code)
+        if nri_name:
+            return nri_name
+        return LISTENING_MODES.get(code.strip().upper()[:2], code)
+
+    def apply_nri_payload(self, raw: str) -> ReceiverCapabilities:
+        """Parse and store structured capabilities from an NRI payload."""
+        capabilities = build_receiver_capabilities(raw)
+        self.receiver_capabilities_model = capabilities
+        self.state.receiver_capabilities = capabilities.as_dict()
+        reference = capabilities.volume_reference
+        if reference is not None:
+            self.state.main.volume_state.volume_reference = reference
+            if self.state.main.volume_state.raw_parameter:
+                self._update_main_volume(self.state.main.volume_state.raw_parameter)
+        return capabilities
 
     async def set_mute(self, muted: bool) -> None:
         """Set main zone mute."""
@@ -170,7 +230,7 @@ class PioneerReceiver:
         await self.send_raw(f"{CMD_INPUT}{code.upper()}")
 
     async def set_listening_mode(self, code: str) -> None:
-        """Set listening mode by 2-char hex code."""
+        """Set listening mode by receiver-provided code suffix."""
         await self.send_raw(f"{CMD_LISTENING_MODE}{code.upper()}")
 
     async def query_audio_info(self) -> None:
@@ -193,6 +253,10 @@ class PioneerReceiver:
             )
             self.capabilities = snapshot
             self.state.capability_probe = snapshot.as_dict()
+            nri_record = snapshot.responses.get("NRI", {})
+            nri_raw = nri_record.get("raw")
+            if isinstance(nri_raw, str) and nri_raw:
+                self.apply_nri_payload(nri_raw)
             self._notify_listeners()
             return snapshot
 
@@ -218,6 +282,15 @@ class PioneerReceiver:
         self.state.connected = False
         self._notify_listeners()
 
+    def _update_main_volume(self, parameter: str) -> None:
+        volume_state = build_volume_state(
+            parameter,
+            volume_reference=self.volume_reference,
+        )
+        self.state.main.volume_state = volume_state
+        if volume_state.absolute_volume is not None:
+            self.state.main.volume = volume_state.absolute_volume
+
     async def _handle_frame(self, frame: EiscpFrame) -> None:
         """Process an incoming ISCP frame and update internal state."""
         waiter = self._probe_waiters.get(frame.command)
@@ -236,9 +309,9 @@ class PioneerReceiver:
                 changed = True
 
         elif cmd == CMD_VOLUME:
-            volume = parse_volume_hex(param)
-            if volume is not None and volume != self.state.main.volume:
-                self.state.main.volume = volume
+            previous = self.state.main.volume_state.raw_parameter
+            self._update_main_volume(param)
+            if param != previous or self.state.main.volume is not None:
                 changed = True
 
         elif cmd == CMD_MUTE:
@@ -254,8 +327,8 @@ class PioneerReceiver:
                 changed = True
 
         elif cmd == CMD_LISTENING_MODE:
-            code = param.strip().upper()[:2] if param else None
-            name = LISTENING_MODES.get(code or "", code)
+            code = param.strip().upper() if param else None
+            name = self.resolve_listening_mode_name(code)
             if code != self.state.listening_mode_code:
                 self.state.listening_mode_code = code
                 self.state.listening_mode = name
@@ -282,10 +355,14 @@ class PioneerReceiver:
                 changed = True
 
         elif cmd == CMD_ZONE2_VOLUME:
-            volume = parse_volume_hex(param)
-            if volume is not None and volume != self.state.zone2.volume:
-                self.state.zone2.volume = volume
+            volume_state = build_volume_state(param, volume_reference=self.volume_reference)
+            if volume_state.absolute_volume != self.state.zone2.volume:
+                self.state.zone2.volume = volume_state.absolute_volume
                 changed = True
+
+        elif cmd == "NRI":
+            self.apply_nri_payload(param if param else frame.raw_iscp[3:])
+            changed = True
 
         elif cmd == "HDO":
             if param != self.state.hdmi_output:

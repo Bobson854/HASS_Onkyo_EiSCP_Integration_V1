@@ -33,8 +33,8 @@ from .parsers import (
     parse_mute,
     parse_power,
     parse_video_information,
-    parse_volume_hex,
 )
+from .volume import build_volume_state
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -105,7 +105,8 @@ def parse_probe_response(command: str, frame: EiscpFrame) -> tuple[dict[str, Any
         if command == CMD_POWER:
             return {"power": parse_power(param), "parameter": param}, None
         if command == CMD_VOLUME:
-            return {"volume": parse_volume_hex(param), "parameter": param}, None
+            volume_state = build_volume_state(param)
+            return {"volume": volume_state.as_dict(), "parameter": param}, None
         if command == CMD_MUTE:
             return {"mute": parse_mute(param), "parameter": param}, None
         if command == CMD_INPUT:

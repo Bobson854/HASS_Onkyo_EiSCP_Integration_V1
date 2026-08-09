@@ -9,7 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, LISTENING_MODE_TO_CODE, LISTENING_MODES
+from .const import LISTENING_MODES
 from .coordinator import PioneerEiscpCoordinator
 from .entity import PioneerConnectedEntity
 
@@ -45,19 +45,26 @@ class PioneerListeningModeSelect(PioneerConnectedEntity, SelectEntity):
         """Initialize the select entity."""
         super().__init__(coordinator, entry)
         self._attr_unique_id = f"{entry.entry_id}_listening_mode"
-        self._attr_options = sorted(set(LISTENING_MODES.values()))
+
+    @property
+    def options(self) -> list[str]:
+        """Return available listening modes from NRI or static fallback."""
+        mode_map = self.coordinator.receiver.get_listening_mode_map()
+        if mode_map:
+            return sorted(mode_map.keys())
+        return sorted(set(LISTENING_MODES.values()))
 
     @property
     def current_option(self) -> str | None:
         """Return current listening mode."""
         mode = self.coordinator.data.listening_mode
-        if mode and mode in self._attr_options:
+        if mode and mode in self.options:
             return mode
         return mode
 
     async def async_select_option(self, option: str) -> None:
         """Change listening mode."""
-        code = LISTENING_MODE_TO_CODE.get(option)
+        code = self.coordinator.receiver.get_listening_mode_map().get(option)
         if code is None:
             _LOGGER.warning("Unknown listening mode: %s", option)
             return
@@ -65,10 +72,7 @@ class PioneerListeningModeSelect(PioneerConnectedEntity, SelectEntity):
 
 
 class PioneerHdmiOutputSelect(PioneerConnectedEntity, SelectEntity):
-    """HDMI output selection (HDO) — architecture placeholder.
-
-    Options will be populated from receiver responses in a future pass.
-    """
+    """HDMI output selection (HDO) — architecture placeholder."""
 
     _attr_name = "HDMI Output"
     _attr_icon = "mdi:hdmi-port"
@@ -90,7 +94,6 @@ class PioneerHdmiOutputSelect(PioneerConnectedEntity, SelectEntity):
         value = self.coordinator.data.hdmi_output
         if value is None:
             return None
-        # Map raw codes when known; otherwise expose raw value if in options.
         return value if value in self._attr_options else None
 
     async def async_select_option(self, option: str) -> None:

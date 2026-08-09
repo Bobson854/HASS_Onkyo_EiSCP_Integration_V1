@@ -15,7 +15,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, INPUT_SOURCES, INPUT_SOURCE_TO_CODE
 from .coordinator import PioneerEiscpCoordinator
 from .entity import PioneerConnectedEntity
 
@@ -68,10 +67,7 @@ class PioneerMainZoneMediaPlayer(PioneerConnectedEntity, MediaPlayerEntity):
     @property
     def volume_level(self) -> float | None:
         """Volume level of the media player (0..1)."""
-        volume = self.coordinator.data.main.volume
-        if volume is None:
-            return None
-        return volume / 100.0
+        return self.coordinator.data.main.volume_state.normalized_level()
 
     @property
     def is_volume_muted(self) -> bool | None:
@@ -81,7 +77,7 @@ class PioneerMainZoneMediaPlayer(PioneerConnectedEntity, MediaPlayerEntity):
     @property
     def source_list(self) -> list[str]:
         """List of available input sources."""
-        return sorted(set(INPUT_SOURCES.values()))
+        return sorted(set(self.coordinator.receiver.get_input_source_map().values()))
 
     @property
     def source(self) -> str | None:
@@ -89,7 +85,8 @@ class PioneerMainZoneMediaPlayer(PioneerConnectedEntity, MediaPlayerEntity):
         code = self.coordinator.data.main.input_code
         if code is None:
             return None
-        return INPUT_SOURCES.get(code, f"0x{code}")
+        source_map = self.coordinator.receiver.get_input_source_map()
+        return source_map.get(code, f"0x{code}")
 
     async def async_turn_on(self) -> None:
         """Turn the receiver on."""
@@ -101,7 +98,7 @@ class PioneerMainZoneMediaPlayer(PioneerConnectedEntity, MediaPlayerEntity):
 
     async def async_set_volume_level(self, volume: float) -> None:
         """Set volume level, range 0..1."""
-        await self.coordinator.receiver.set_volume(int(volume * 100))
+        await self.coordinator.receiver.set_volume_level(volume)
 
     async def async_mute_volume(self, mute: bool) -> None:
         """Mute or unmute."""
@@ -109,7 +106,7 @@ class PioneerMainZoneMediaPlayer(PioneerConnectedEntity, MediaPlayerEntity):
 
     async def async_select_source(self, source: str) -> None:
         """Select input source."""
-        code = INPUT_SOURCE_TO_CODE.get(source)
+        code = self.coordinator.receiver.get_input_source_reverse_map().get(source)
         if code is None:
             _LOGGER.warning("Unknown source: %s", source)
             return
@@ -119,9 +116,14 @@ class PioneerMainZoneMediaPlayer(PioneerConnectedEntity, MediaPlayerEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return diagnostic-friendly attributes (not full protocol dump)."""
         audio = self.coordinator.data.audio
+        volume_state = self.coordinator.data.main.volume_state
         return {
             "listening_mode": self.coordinator.data.listening_mode,
             "audio_input_port": audio.input_port,
             "audio_output_format": audio.output_format,
             "connected": self.coordinator.receiver.connected,
+            "volume_raw": volume_state.raw_parameter,
+            "volume_reference": volume_state.volume_reference,
+            "volume_db": volume_state.volume_db,
+            "absolute_volume": volume_state.absolute_volume,
         }

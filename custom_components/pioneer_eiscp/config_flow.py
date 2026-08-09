@@ -81,7 +81,7 @@ class PioneerEiscpConfigFlow(ConfigFlow, domain=DOMAIN):
                 _LOGGER.warning("Invalid port in setup for %s: %s", host, err)
                 errors["base"] = "unknown"
             else:
-                # TODO: NRI/ECN discovery may expose a stable receiver identifier
+                # TODO: NRI deviceserial may replace host:port as stable device/config ID
                 # (e.g. network MAC-based id) to replace host:port as unique_id.
                 await self.async_set_unique_id(f"{host}:{port}")
                 self._abort_if_unique_id_configured()

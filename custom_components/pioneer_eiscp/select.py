@@ -9,7 +9,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import LISTENING_MODES
 from .coordinator import PioneerEiscpCoordinator
 from .entity import PioneerConnectedEntity
 
@@ -48,19 +47,17 @@ class PioneerListeningModeSelect(PioneerConnectedEntity, SelectEntity):
 
     @property
     def options(self) -> list[str]:
-        """Return available listening modes from NRI or static fallback."""
-        mode_map = self.coordinator.receiver.get_listening_mode_map()
-        if mode_map:
-            return sorted(mode_map.keys())
-        return sorted(set(LISTENING_MODES.values()))
+        """Return available listening-mode command options from NRI or static fallback."""
+        return self.coordinator.receiver.get_listening_mode_options()
 
     @property
     def current_option(self) -> str | None:
-        """Return current listening mode."""
-        mode = self.coordinator.data.listening_mode
-        if mode and mode in self.options:
-            return mode
-        return mode
+        """Return the selectable command family matching exact receiver state."""
+        option = self.coordinator.data.listening_mode_select_option
+        options = self.options
+        if option is not None and option not in options:
+            return None
+        return option
 
     async def async_select_option(self, option: str) -> None:
         """Change listening mode."""

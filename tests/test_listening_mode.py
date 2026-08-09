@@ -219,8 +219,8 @@ class TestReceiverListeningModeState:
 
         receiver.apply_nri_payload(fixture_mod.SYNTHETIC_NRI_XML)
         selectable = receiver.get_listening_mode_map()
-        assert "LMD Auto/Direct" in selectable
-        assert selectable["LMD Auto/Direct"] == "AUTO"
+        assert "Auto/Direct" in selectable
+        assert selectable["Auto/Direct"] == "AUTO"
 
         framing = sys.modules["pioneer_eiscp.protocol.framing"]
         await receiver._handle_frame(

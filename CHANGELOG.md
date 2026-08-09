@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.13
+
+- Fix listening-mode select entity: reconcile exact receiver state to NRI command-family options so HA no longer shows Unknown when state labels differ (e.g. Auto Surround → Auto/Direct).
+
 ## 0.1.12
 
 - Improve listening-mode display: layered LMD protocol mapping with IFA `output_format` fallback for unknown codes; raw `listening_mode_code` retained separately from NRI selectable command options.

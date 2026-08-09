@@ -38,7 +38,13 @@ from .protocol.parsers import (
     parse_video_information,
 )
 from .protocol.transport import EiscpConnection
-from .protocol.listening_mode import normalize_lmd_code, resolve_listening_mode_display
+from .protocol.listening_mode import (
+    build_user_listening_mode_map,
+    format_static_listening_mode,
+    normalize_lmd_code,
+    resolve_listening_mode_display,
+    resolve_select_option,
+)
 from .protocol.volume import VolumeState, build_volume_state, format_mvl_parameter
 
 _LOGGER = logging.getLogger(__name__)
@@ -64,6 +70,8 @@ class ReceiverState:
     listening_mode: str | None = None
     listening_mode_code: str | None = None
     listening_mode_source: str | None = None
+    listening_mode_select_option: str | None = None
+    listening_mode_select_match_source: str | None = None
     hdmi_output: str | None = None
     audio: AudioInformation = field(default_factory=AudioInformation)
     video: VideoInformation = field(default_factory=VideoInformation)
@@ -96,6 +104,8 @@ class ReceiverState:
             "listening_mode": self.listening_mode,
             "listening_mode_code": self.listening_mode_code,
             "listening_mode_source": self.listening_mode_source,
+            "listening_mode_select_option": self.listening_mode_select_option,
+            "listening_mode_select_match_source": self.listening_mode_select_match_source,
             "hdmi_output": self.hdmi_output,
             "audio": self.audio.as_dict(),
             "video": self.video.as_dict(),
@@ -201,11 +211,27 @@ class PioneerReceiver:
         return nri_map if nri_map else dict(INPUT_SOURCE_TO_CODE)
 
     def get_listening_mode_map(self) -> dict[str, str]:
-        """Return display name->code listening-mode map from NRI or static fallback."""
+        """Return user-facing option label->command code map from NRI or static fallback."""
         nri_map = self.receiver_capabilities_model.listening_mode_map()
         if nri_map:
-            return nri_map
-        return {name: code for code, name in LISTENING_MODES.items()}
+            return build_user_listening_mode_map(nri_map)
+        return {
+            format_static_listening_mode(name): code
+            for code, name in LISTENING_MODES.items()
+        }
+
+    def get_listening_mode_options(self) -> list[str]:
+        """Return sorted selectable listening-mode option labels."""
+        return sorted(self.get_listening_mode_map())
+
+    def resolve_listening_mode_select_option(self) -> tuple[str | None, str | None]:
+        """Map exact receiver state to a valid select option, if possible."""
+        options = self.get_listening_mode_options()
+        return resolve_select_option(
+            self.state.listening_mode,
+            self.state.listening_mode_code,
+            options,
+        )
 
     def resolve_listening_mode_name(self, code: str | None) -> str | None:
         """Resolve an LMD response code to a display name for diagnostics."""
@@ -221,11 +247,25 @@ class PioneerReceiver:
             self.state.listening_mode_code,
             ifa_output_format=self.state.audio.output_format,
         )
-        if display == self.state.listening_mode and source == self.state.listening_mode_source:
-            return False
-        self.state.listening_mode = display
-        self.state.listening_mode_source = source
-        return True
+        changed = False
+        if display != self.state.listening_mode or source != self.state.listening_mode_source:
+            self.state.listening_mode = display
+            self.state.listening_mode_source = source
+            changed = True
+
+        select_option, select_source = resolve_select_option(
+            self.state.listening_mode,
+            self.state.listening_mode_code,
+            self.get_listening_mode_options(),
+        )
+        if (
+            select_option != self.state.listening_mode_select_option
+            or select_source != self.state.listening_mode_select_match_source
+        ):
+            self.state.listening_mode_select_option = select_option
+            self.state.listening_mode_select_match_source = select_source
+            changed = True
+        return changed
 
     def apply_nri_payload(self, raw: str) -> ReceiverCapabilities:
         """Parse and store structured capabilities from an NRI payload."""
@@ -237,6 +277,7 @@ class PioneerReceiver:
             self.state.main.volume_state.volume_reference = reference
         if self.state.main.volume_state.raw_parameter:
             self._update_main_volume(self.state.main.volume_state.raw_parameter)
+        self._refresh_listening_mode_display()
         self._notify_listeners()
         return capabilities
 

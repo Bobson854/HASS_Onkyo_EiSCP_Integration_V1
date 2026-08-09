@@ -27,7 +27,7 @@ Initial development and testing target the **Pioneer VSX-1131**. Newer Pioneer r
 | Main zone media player | Working |
 | IFA audio information | Working |
 | IFV video information | Parser ready; limited entity exposure |
-| Listening mode | Resolved display from LMD + IFA fallback; NRI command options separate |
+| Listening mode | Exact state on media player; select shows NRI command family (v0.1.13+) |
 | Input sources | Dynamic from NRI when probed; static fallback before probe |
 | Volume | Absolute decimal MVL with NRI `volmax` reference when available |
 | HDMI output select | Placeholder (disabled by default) |
@@ -124,6 +124,8 @@ After a successful probe, supported receivers can expose **NRI** (Network Remote
 - zone presence (for example Zone 2)
 
 Entities use NRI-derived maps when available and fall back to static lists until the first successful probe. Device registry identifiers still use `host:port`; a future migration may adopt the receiver serial from NRI.
+
+The **Listening Mode** select shows the closest NRI **command family** (e.g. Auto/Direct). The media player attribute `listening_mode` shows the **exact** decoder state (e.g. Auto Surround from IFA), with `listening_mode_code` retaining the raw LMD response.
 
 See [CHANGELOG.md](CHANGELOG.md) for version notes (including transport lifecycle diagnostics in 0.1.10).
 

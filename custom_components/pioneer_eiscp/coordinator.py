@@ -105,6 +105,7 @@ class PioneerEiscpCoordinator(DataUpdateCoordinator[ReceiverState]):
             "host": self.receiver.host,
             "port": self.receiver.port,
             "connected": self.receiver.connected,
+            "transport": self.receiver.get_transport_diagnostics(),
             "state": self.receiver.get_state_dict(),
             "capability_probe": self.receiver.capabilities.as_dict(),
             "receiver_capabilities": self.receiver.receiver_capabilities_model.as_dict(),

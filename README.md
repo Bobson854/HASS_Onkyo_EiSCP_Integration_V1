@@ -125,7 +125,7 @@ After a successful probe, supported receivers can expose **NRI** (Network Remote
 
 Entities use NRI-derived maps when available and fall back to static lists until the first successful probe. Device registry identifiers still use `host:port`; a future migration may adopt the receiver serial from NRI.
 
-See [CHANGELOG.md](CHANGELOG.md) for version notes.
+See [CHANGELOG.md](CHANGELOG.md) for version notes (including transport lifecycle diagnostics in 0.1.10).
 
 **Debug logging** (`configuration.yaml`):
 

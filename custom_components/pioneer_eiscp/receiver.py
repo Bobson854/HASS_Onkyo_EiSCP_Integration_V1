@@ -135,6 +135,10 @@ class PioneerReceiver:
         """Return connection status."""
         return self._connection.connected
 
+    def get_transport_diagnostics(self) -> dict[str, Any]:
+        """Return transport lifecycle diagnostics."""
+        return self._connection.get_diagnostics()
+
     def add_listener(self, event: asyncio.Event) -> None:
         """Register a listener notified on state changes."""
         self._listeners.append(event)

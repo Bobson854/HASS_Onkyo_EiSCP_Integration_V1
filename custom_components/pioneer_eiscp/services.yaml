@@ -1,0 +1,11 @@
+send_raw:
+  name: Send raw ISCP command
+  description: Send a low-level ISCP command body to the receiver (engineering/testing).
+  fields:
+    iscp_command:
+      name: ISCP command
+      description: Raw ISCP body, e.g. IFAQSTN, LMDQSTN, MVL14.
+      required: true
+      example: IFAQSTN
+      selector:
+        text:

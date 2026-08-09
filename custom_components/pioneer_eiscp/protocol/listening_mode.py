@@ -1,29 +1,16 @@
-"""Listening-mode current-state resolution (LMD + IFA fallback)."""
+"""Listening-mode current-state and select-option resolution."""
 
 from __future__ import annotations
 
 from ..const import LISTENING_MODES
 
-SOURCE_IFA_OUTPUT_FORMAT = "ifa_output_format"
 SOURCE_LMD_MAPPING = "lmd_mapping"
+SOURCE_NRI_CODE_MATCH = "nri_code_match"
 SOURCE_RAW_FALLBACK = "raw_fallback"
 
 SELECT_MATCH_EXACT = "exact_label"
+SELECT_MATCH_NRI_CODE = "nri_code_match"
 SELECT_MATCH_SEMANTIC = "semantic_family"
-
-_UNHELPFUL_IFA_OUTPUTS = frozenset(
-    {
-        "",
-        "-",
-        "--",
-        "n/a",
-        "na",
-        "none",
-        "not available",
-        "unknown",
-        "unavailable",
-    }
-)
 
 
 def normalize_lmd_code(code: str | None) -> str | None:
@@ -50,37 +37,6 @@ def lookup_static_lmd_mapping(code: str | None) -> str | None:
     if static_name is None:
         return None
     return format_static_listening_mode(static_name)
-
-
-def is_meaningful_ifa_output_format(value: str | None) -> bool:
-    """Return True when IFA output format can label an unknown LMD code."""
-    if value is None:
-        return False
-    stripped = value.strip()
-    if not stripped:
-        return False
-    return stripped.lower() not in _UNHELPFUL_IFA_OUTPUTS
-
-
-def resolve_listening_mode_display(
-    code: str | None,
-    *,
-    ifa_output_format: str | None = None,
-) -> tuple[str | None, str | None]:
-    """Resolve the human-readable current listening mode and its source."""
-    normalized = normalize_lmd_code(code)
-    if not normalized:
-        return None, None
-
-    static_name = lookup_static_lmd_mapping(normalized)
-    if static_name is not None:
-        return static_name, SOURCE_LMD_MAPPING
-
-    if is_meaningful_ifa_output_format(ifa_output_format):
-        assert ifa_output_format is not None
-        return ifa_output_format.strip(), SOURCE_IFA_OUTPUT_FORMAT
-
-    return normalized, SOURCE_RAW_FALLBACK
 
 
 def normalize_select_label(value: str) -> str:
@@ -110,9 +66,36 @@ def build_user_listening_mode_map(nri_control_map: dict[str, str]) -> dict[str, 
     return options
 
 
-# Normalized exact receiver state -> normalized selectable option label.
+def build_nri_code_to_option(nri_control_map: dict[str, str]) -> dict[str, str]:
+    """Map enabled NRI command codes to user-facing option labels."""
+    user_map = build_user_listening_mode_map(nri_control_map)
+    return {code.strip().upper(): label for label, code in user_map.items()}
+
+
+def resolve_listening_mode_display(
+    code: str | None,
+    *,
+    nri_code_to_option: dict[str, str] | None = None,
+) -> tuple[str | None, str | None]:
+    """Resolve the human-readable listening mode from LMD/NRI/static sources."""
+    normalized = normalize_lmd_code(code)
+    if not normalized:
+        return None, None
+
+    static_name = lookup_static_lmd_mapping(normalized)
+    if static_name is not None:
+        return static_name, SOURCE_LMD_MAPPING
+
+    if nri_code_to_option:
+        nri_label = nri_code_to_option.get(normalized)
+        if nri_label:
+            return nri_label, SOURCE_NRI_CODE_MATCH
+
+    return normalized, SOURCE_RAW_FALLBACK
+
+
+# Normalized exact display state -> normalized selectable option label.
 _SEMANTIC_STATE_TO_OPTION: tuple[tuple[str, str], ...] = (
-    ("auto surround", "auto/direct"),
     ("direct", "auto/direct"),
     ("pure direct", "pure direct"),
     ("pure audio", "pure direct"),
@@ -125,14 +108,20 @@ def resolve_select_option(
     listening_mode: str | None,
     listening_mode_code: str | None,
     options: list[str],
+    *,
+    nri_code_to_option: dict[str, str] | None = None,
 ) -> tuple[str | None, str | None]:
-    """Map exact receiver listening state to a selectable NRI command option."""
-    del listening_mode_code  # never hardcode state codes such as FF or 40
-
+    """Map receiver listening state to a selectable NRI command option."""
     if not options:
         return None, None
 
     normalized_options = {normalize_select_label(option): option for option in options}
+
+    normalized_code = normalize_lmd_code(listening_mode_code)
+    if normalized_code and nri_code_to_option:
+        nri_label = nri_code_to_option.get(normalized_code)
+        if nri_label and nri_label in options:
+            return nri_label, SELECT_MATCH_NRI_CODE
 
     if not listening_mode:
         return None, None

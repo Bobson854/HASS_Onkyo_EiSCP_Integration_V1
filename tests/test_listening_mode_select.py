@@ -23,6 +23,12 @@ _fixture_spec.loader.exec_module(_fixture_mod)
 SYNTHETIC_NRI_XML = _fixture_mod.SYNTHETIC_NRI_XML
 
 NRI_OPTIONS = ["Auto/Direct", "Pure Direct", "Stereo", "Surround"]
+NRI_CODE_TO_OPTION = {
+    "11": "Pure Direct",
+    "AUTO": "Auto/Direct",
+    "STEREO": "Stereo",
+    "SURR": "Surround",
+}
 
 
 def _load_modules():
@@ -76,55 +82,90 @@ def _assert_option_in_options(option: str | None, options: list[str]) -> None:
 class TestResolveSelectOption:
     """Unit tests for select option reconciliation."""
 
-    def test_auto_surround_maps_to_auto_direct(self) -> None:
-        option, source = lm.resolve_select_option("Auto Surround", "40", NRI_OPTIONS)
-        assert option == "Auto/Direct"
-        assert source == lm.SELECT_MATCH_SEMANTIC
-
-    def test_auto_surround_with_ff_code_not_hardcoded(self) -> None:
-        option, source = lm.resolve_select_option("Auto Surround", "FF", NRI_OPTIONS)
-        assert option == "Auto/Direct"
-        assert source == lm.SELECT_MATCH_SEMANTIC
-
-    def test_pure_direct_maps_to_pure_direct(self) -> None:
-        option, source = lm.resolve_select_option("Pure Direct", "0D", NRI_OPTIONS)
+    def test_nri_code_11_matches_pure_direct(self) -> None:
+        option, source = lm.resolve_select_option(
+            None,
+            "11",
+            NRI_OPTIONS,
+            nri_code_to_option=NRI_CODE_TO_OPTION,
+        )
         assert option == "Pure Direct"
-        assert source in {lm.SELECT_MATCH_EXACT, lm.SELECT_MATCH_SEMANTIC}
+        assert source == lm.SELECT_MATCH_NRI_CODE
 
-    def test_stereo_maps_to_stereo_option(self) -> None:
-        option, _source = lm.resolve_select_option("Stereo", None, NRI_OPTIONS)
-        assert option == "Stereo"
-
-    def test_surround_maps_to_surround(self) -> None:
-        option, _source = lm.resolve_select_option("Surround", None, NRI_OPTIONS)
-        assert option == "Surround"
-
-    def test_direct_maps_to_auto_direct(self) -> None:
-        option, source = lm.resolve_select_option("Direct", "01", NRI_OPTIONS)
-        assert option == "Auto/Direct"
-        assert source == lm.SELECT_MATCH_SEMANTIC
-
-    def test_unknown_state_returns_none(self) -> None:
-        option, source = lm.resolve_select_option("Dolby Atmos", "99", NRI_OPTIONS)
+    def test_unknown_code_40_returns_none(self) -> None:
+        option, source = lm.resolve_select_option(
+            "40",
+            "40",
+            NRI_OPTIONS,
+            nri_code_to_option=NRI_CODE_TO_OPTION,
+        )
         assert option is None
         assert source is None
 
-    def test_empty_options_returns_none(self) -> None:
-        option, source = lm.resolve_select_option("Auto Surround", "40", [])
+    def test_dolby_digital_display_does_not_match_select(self) -> None:
+        option, source = lm.resolve_select_option(
+            "Dolby Digital",
+            "11",
+            NRI_OPTIONS,
+            nri_code_to_option=NRI_CODE_TO_OPTION,
+        )
+        assert option == "Pure Direct"
+        assert source == lm.SELECT_MATCH_NRI_CODE
+
+    def test_direct_maps_to_auto_direct(self) -> None:
+        option, source = lm.resolve_select_option(
+            "Direct",
+            "01",
+            NRI_OPTIONS,
+            nri_code_to_option=NRI_CODE_TO_OPTION,
+        )
+        assert option == "Auto/Direct"
+        assert source == lm.SELECT_MATCH_SEMANTIC
+
+    def test_stereo_maps_to_stereo_option(self) -> None:
+        option, _source = lm.resolve_select_option(
+            "Stereo",
+            None,
+            NRI_OPTIONS,
+            nri_code_to_option=NRI_CODE_TO_OPTION,
+        )
+        assert option == "Stereo"
+
+    def test_surround_maps_to_surround(self) -> None:
+        option, _source = lm.resolve_select_option(
+            "Surround",
+            None,
+            NRI_OPTIONS,
+            nri_code_to_option=NRI_CODE_TO_OPTION,
+        )
+        assert option == "Surround"
+
+    def test_unknown_state_returns_none(self) -> None:
+        option, source = lm.resolve_select_option(
+            "Dolby Atmos",
+            "99",
+            NRI_OPTIONS,
+            nri_code_to_option=NRI_CODE_TO_OPTION,
+        )
         assert option is None
         assert source is None
 
     def test_current_option_always_in_options(self) -> None:
         cases = [
-            ("Auto Surround", "40"),
+            ("Pure Direct", "11"),
             ("Direct", "01"),
-            ("Pure Direct", "0D"),
+            ("40", "40"),
+            ("FF", "FF"),
             ("Stereo", None),
-            ("Surround", None),
             ("Unknown Mode", "AB"),
         ]
         for state, code in cases:
-            option, _source = lm.resolve_select_option(state, code, NRI_OPTIONS)
+            option, _source = lm.resolve_select_option(
+                state,
+                code,
+                NRI_OPTIONS,
+                nri_code_to_option=NRI_CODE_TO_OPTION,
+            )
             _assert_option_in_options(option, NRI_OPTIONS)
 
 
@@ -141,13 +182,32 @@ class TestReceiverListeningModeSelect:
     def test_nri_options_are_user_facing_labels(self, receiver: PioneerReceiver) -> None:
         mode_map = receiver.get_listening_mode_map()
         assert set(mode_map) == set(NRI_OPTIONS)
-        assert mode_map["Auto/Direct"] == "AUTO"
         assert mode_map["Pure Direct"] == "11"
-        assert mode_map["Stereo"] == "STEREO"
-        assert mode_map["Surround"] == "SURR"
 
     @pytest.mark.asyncio
-    async def test_live_like_auto_surround_state(self, receiver: PioneerReceiver) -> None:
+    async def test_lmd11_with_ifa_dolby_digital(self, receiver: PioneerReceiver) -> None:
+        framing = sys.modules["pioneer_eiscp.protocol.framing"]
+        await receiver._handle_frame(
+            framing.EiscpFrame(command="LMD", parameter="11", raw_iscp="LMD11")
+        )
+        await receiver._handle_frame(
+            framing.EiscpFrame(
+                command="IFA",
+                parameter="OPTICAL 2,Dolby D,48 kHz,5.1 ch,Dolby Digital,3.1 ch,48 kHz,",
+                raw_iscp="IFAOPTICAL 2,Dolby D,48 kHz,5.1 ch,Dolby Digital,3.1 ch,48 kHz,",
+            )
+        )
+        assert receiver.state.listening_mode == "Pure Direct"
+        assert receiver.state.listening_mode_source == lm.SOURCE_NRI_CODE_MATCH
+        assert receiver.state.audio.output_format == "Dolby Digital"
+        assert receiver.state.listening_mode_select_option == "Pure Direct"
+        _assert_option_in_options(
+            receiver.state.listening_mode_select_option,
+            receiver.get_listening_mode_options(),
+        )
+
+    @pytest.mark.asyncio
+    async def test_lmd40_with_ifa_auto_surround_stays_raw(self, receiver: PioneerReceiver) -> None:
         framing = sys.modules["pioneer_eiscp.protocol.framing"]
         await receiver._handle_frame(
             framing.EiscpFrame(command="LMD", parameter="40", raw_iscp="LMD40")
@@ -159,53 +219,29 @@ class TestReceiverListeningModeSelect:
                 raw_iscp="IFAOPTICAL 2,Dolby D,48 kHz,5.1 ch,Auto Surround,3.1 ch,48 kHz,",
             )
         )
-        assert receiver.state.listening_mode == "Auto Surround"
-        assert receiver.state.listening_mode_code == "40"
-        assert receiver.state.listening_mode_source == lm.SOURCE_IFA_OUTPUT_FORMAT
-        assert receiver.state.listening_mode_select_option == "Auto/Direct"
-        assert receiver.state.listening_mode_select_match_source == lm.SELECT_MATCH_SEMANTIC
-        _assert_option_in_options(
-            receiver.state.listening_mode_select_option,
-            receiver.get_listening_mode_options(),
-        )
+        assert receiver.state.listening_mode == "40"
+        assert receiver.state.listening_mode_source == lm.SOURCE_RAW_FALLBACK
+        assert receiver.state.audio.output_format == "Auto Surround"
+        assert receiver.state.listening_mode_select_option is None
 
     @pytest.mark.asyncio
-    async def test_exact_state_unaffected_by_select_mapping(self, receiver: PioneerReceiver) -> None:
-        framing = sys.modules["pioneer_eiscp.protocol.framing"]
-        await receiver._handle_frame(
-            framing.EiscpFrame(command="LMD", parameter="FF", raw_iscp="LMDFF")
-        )
-        await receiver._handle_frame(
-            framing.EiscpFrame(
-                command="IFA",
-                parameter="OPTICAL 2,Dolby D,48 kHz,5.1 ch,Auto Surround,3.1 ch,48 kHz,",
-                raw_iscp="IFAOPTICAL 2,Dolby D,48 kHz,5.1 ch,Auto Surround,3.1 ch,48 kHz,",
-            )
-        )
-        assert receiver.state.listening_mode_code == "FF"
-        assert receiver.state.listening_mode == "Auto Surround"
-        assert receiver.state.listening_mode_select_option == "Auto/Direct"
-
-    @pytest.mark.asyncio
-    async def test_select_auto_direct_sends_auto_command(self, receiver: PioneerReceiver) -> None:
+    async def test_set_listening_mode_requests_lmd_and_ifa(self, receiver: PioneerReceiver) -> None:
         receiver._connection.send = AsyncMock()
-        await receiver.set_listening_mode(
-            receiver.get_listening_mode_map()["Auto/Direct"]
-        )
-        receiver._connection.send.assert_awaited_once_with("LMDAUTO")
-
-    @pytest.mark.asyncio
-    async def test_select_pure_direct_sends_11(self, receiver: PioneerReceiver) -> None:
-        receiver._connection.send = AsyncMock()
-        await receiver.set_listening_mode(
-            receiver.get_listening_mode_map()["Pure Direct"]
-        )
-        receiver._connection.send.assert_awaited_once_with("LMD11")
+        await receiver.set_listening_mode("11")
+        assert receiver._connection.send.await_count == 3
+        assert receiver._connection.send.await_args_list[0].args[0] == "LMD11"
+        assert receiver._connection.send.await_args_list[1].args[0] == "LMDQSTN"
+        assert receiver._connection.send.await_args_list[2].args[0] == "IFAQSTN"
 
     def test_no_nri_capabilities_static_fallback(self) -> None:
         receiver = PioneerReceiver("192.0.2.10", 60128)
         receiver._connection = MagicMock(connected=True)
         options = receiver.get_listening_mode_options()
         assert options
-        option, _source = lm.resolve_select_option("Direct", "01", options)
+        option, _source = lm.resolve_select_option(
+            "Direct",
+            "01",
+            options,
+            nri_code_to_option=receiver.get_nri_code_to_option(),
+        )
         _assert_option_in_options(option, options)

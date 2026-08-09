@@ -125,7 +125,7 @@ After a successful probe, supported receivers can expose **NRI** (Network Remote
 
 Entities use NRI-derived maps when available and fall back to static lists until the first successful probe. Device registry identifiers still use `host:port`; a future migration may adopt the receiver serial from NRI.
 
-The **Listening Mode** select shows the closest NRI **command family** (e.g. Auto/Direct). The media player attribute `listening_mode` shows the **exact** decoder state (e.g. Auto Surround from IFA), with `listening_mode_code` retaining the raw LMD response.
+The **Listening Mode** select shows the closest NRI **command family** (e.g. Pure Direct, Auto/Direct). The media player attribute `listening_mode` shows the **exact listening-mode state** from LMD/NRI/static mapping — **not** IFA decoder output. IFA `output_format` (e.g. Dolby Digital, Auto Surround) appears on the **Audio Output** sensor only.
 
 See [CHANGELOG.md](CHANGELOG.md) for version notes (including transport lifecycle diagnostics in 0.1.10).
 

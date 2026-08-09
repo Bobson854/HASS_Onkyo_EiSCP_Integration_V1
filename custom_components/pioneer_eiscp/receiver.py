@@ -39,6 +39,7 @@ from .protocol.parsers import (
 )
 from .protocol.transport import EiscpConnection
 from .protocol.listening_mode import (
+    build_nri_code_to_option,
     build_user_listening_mode_map,
     format_static_listening_mode,
     normalize_lmd_code,
@@ -224,28 +225,37 @@ class PioneerReceiver:
         """Return sorted selectable listening-mode option labels."""
         return sorted(self.get_listening_mode_map())
 
+    def get_nri_code_to_option(self) -> dict[str, str]:
+        """Map enabled NRI listening-mode command codes to option labels."""
+        nri_map = self.receiver_capabilities_model.listening_mode_map()
+        if not nri_map:
+            return {}
+        return build_nri_code_to_option(nri_map)
+
     def resolve_listening_mode_select_option(self) -> tuple[str | None, str | None]:
         """Map exact receiver state to a valid select option, if possible."""
-        options = self.get_listening_mode_options()
+        nri_code_to_option = self.get_nri_code_to_option()
         return resolve_select_option(
             self.state.listening_mode,
             self.state.listening_mode_code,
-            options,
+            self.get_listening_mode_options(),
+            nri_code_to_option=nri_code_to_option,
         )
 
     def resolve_listening_mode_name(self, code: str | None) -> str | None:
         """Resolve an LMD response code to a display name for diagnostics."""
         display, _source = resolve_listening_mode_display(
             code,
-            ifa_output_format=self.state.audio.output_format,
+            nri_code_to_option=self.get_nri_code_to_option(),
         )
         return display
 
     def _refresh_listening_mode_display(self) -> bool:
-        """Recalculate listening-mode display from LMD code and IFA fallback."""
+        """Recalculate listening-mode display and select reconciliation."""
+        nri_code_to_option = self.get_nri_code_to_option()
         display, source = resolve_listening_mode_display(
             self.state.listening_mode_code,
-            ifa_output_format=self.state.audio.output_format,
+            nri_code_to_option=nri_code_to_option,
         )
         changed = False
         if display != self.state.listening_mode or source != self.state.listening_mode_source:
@@ -257,6 +267,7 @@ class PioneerReceiver:
             self.state.listening_mode,
             self.state.listening_mode_code,
             self.get_listening_mode_options(),
+            nri_code_to_option=nri_code_to_option,
         )
         if (
             select_option != self.state.listening_mode_select_option
@@ -303,8 +314,12 @@ class PioneerReceiver:
         await self.send_raw(f"{CMD_INPUT}{code.upper()}")
 
     async def set_listening_mode(self, code: str) -> None:
-        """Set listening mode by receiver-provided code suffix."""
+        """Set listening mode and request authoritative LMD/IFA state."""
         await self.send_raw(f"{CMD_LISTENING_MODE}{code.upper()}")
+        await asyncio.sleep(0.15)
+        await self.send_raw(f"{CMD_LISTENING_MODE}{QUERY_SUFFIX}")
+        await asyncio.sleep(0.15)
+        await self.query_audio_info()
 
     async def query_audio_info(self) -> None:
         """Request IFA audio information."""
@@ -410,8 +425,6 @@ class PioneerReceiver:
         elif cmd == CMD_AUDIO_INFO:
             self.state.audio = parse_audio_information(param)
             changed = True
-            if self._refresh_listening_mode_display():
-                changed = True
 
         elif cmd == CMD_VIDEO_INFO:
             self.state.video = parse_video_information(param)

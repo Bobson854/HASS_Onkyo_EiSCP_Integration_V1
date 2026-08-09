@@ -14,6 +14,13 @@ ROOT = Path(__file__).resolve().parents[1]
 BASE = ROOT / "custom_components" / "pioneer_eiscp"
 PROTOCOL = BASE / "protocol"
 
+NRI_CODE_TO_OPTION = {
+    "11": "Pure Direct",
+    "AUTO": "Auto/Direct",
+    "STEREO": "Stereo",
+    "SURR": "Surround",
+}
+
 
 def _load_listening_mode():
     for mod in list(sys.modules):
@@ -81,45 +88,45 @@ lm = _load_listening_mode()
 
 
 class TestListeningModeResolution:
-    """Unit tests for layered listening-mode display resolution."""
+    """Unit tests for listening-mode display resolution."""
 
     def test_known_lmd01_resolves_to_direct(self) -> None:
         display, source = lm.resolve_listening_mode_display("01")
         assert display == "Direct"
         assert source == lm.SOURCE_LMD_MAPPING
 
-    def test_unknown_lmd_without_ifa_falls_back_to_raw(self) -> None:
+    def test_unknown_lmd_falls_back_to_raw(self) -> None:
         display, source = lm.resolve_listening_mode_display("FF")
         assert display == "FF"
         assert source == lm.SOURCE_RAW_FALLBACK
 
-    def test_unknown_lmd_with_ifa_uses_output_format(self) -> None:
+    def test_unknown_lmd40_falls_back_to_raw_not_ifa(self) -> None:
         display, source = lm.resolve_listening_mode_display(
-            "FF",
-            ifa_output_format="Auto Surround",
+            "40",
+            nri_code_to_option=NRI_CODE_TO_OPTION,
         )
-        assert display == "Auto Surround"
-        assert source == lm.SOURCE_IFA_OUTPUT_FORMAT
-
-    def test_unhelpful_ifa_does_not_override_unknown_lmd(self) -> None:
-        display, source = lm.resolve_listening_mode_display(
-            "FF",
-            ifa_output_format="Unknown",
-        )
-        assert display == "FF"
+        assert display == "40"
         assert source == lm.SOURCE_RAW_FALLBACK
 
-    def test_known_lmd_overrides_stale_ifa(self) -> None:
+    def test_nri_code_match_11_is_pure_direct(self) -> None:
+        display, source = lm.resolve_listening_mode_display(
+            "11",
+            nri_code_to_option=NRI_CODE_TO_OPTION,
+        )
+        assert display == "Pure Direct"
+        assert source == lm.SOURCE_NRI_CODE_MATCH
+
+    def test_static_mapping_precedes_nri_for_known_codes(self) -> None:
         display, source = lm.resolve_listening_mode_display(
             "01",
-            ifa_output_format="Auto Surround",
+            nri_code_to_option=NRI_CODE_TO_OPTION,
         )
         assert display == "Direct"
         assert source == lm.SOURCE_LMD_MAPPING
 
 
 class TestReceiverListeningModeState:
-    """Receiver frame handling for LMD/IFA ordering."""
+    """Receiver frame handling for LMD/IFA separation."""
 
     @pytest.fixture
     def receiver(self):
@@ -129,15 +136,11 @@ class TestReceiverListeningModeState:
         return rec
 
     @pytest.mark.asyncio
-    async def test_lmd_ff_then_ifa_auto_surround(self, receiver) -> None:
+    async def test_ifa_does_not_change_listening_mode(self, receiver) -> None:
         framing = sys.modules["pioneer_eiscp.protocol.framing"]
         await receiver._handle_frame(
             framing.EiscpFrame(command="LMD", parameter="FF", raw_iscp="LMDFF")
         )
-        assert receiver.state.listening_mode_code == "FF"
-        assert receiver.state.listening_mode == "FF"
-        assert receiver.state.listening_mode_source == lm.SOURCE_RAW_FALLBACK
-
         await receiver._handle_frame(
             framing.EiscpFrame(
                 command="IFA",
@@ -146,37 +149,41 @@ class TestReceiverListeningModeState:
             )
         )
         assert receiver.state.listening_mode_code == "FF"
-        assert receiver.state.listening_mode == "Auto Surround"
-        assert receiver.state.listening_mode_source == lm.SOURCE_IFA_OUTPUT_FORMAT
+        assert receiver.state.listening_mode == "FF"
+        assert receiver.state.listening_mode_source == lm.SOURCE_RAW_FALLBACK
+        assert receiver.state.audio.output_format == "Auto Surround"
 
     @pytest.mark.asyncio
-    async def test_ifa_first_then_lmd_ff(self, receiver) -> None:
-        framing = sys.modules["pioneer_eiscp.protocol.framing"]
-        await receiver._handle_frame(
-            framing.EiscpFrame(
-                command="IFA",
-                parameter="OPTICAL 2,Dolby D,48 kHz,5.1 ch,Auto Surround,3.1 ch,48 kHz,",
-                raw_iscp="IFAOPTICAL 2,Dolby D,48 kHz,5.1 ch,Auto Surround,3.1 ch,48 kHz,",
-            )
-        )
-        await receiver._handle_frame(
-            framing.EiscpFrame(command="LMD", parameter="FF", raw_iscp="LMDFF")
-        )
-        assert receiver.state.listening_mode == "Auto Surround"
-        assert receiver.state.listening_mode_source == lm.SOURCE_IFA_OUTPUT_FORMAT
+    async def test_ifa_dolby_digital_does_not_override_lmd11_with_nri(self, receiver) -> None:
+        fixture_path = Path(__file__).resolve().parent / "nri_fixtures.py"
+        spec = importlib.util.spec_from_file_location("nri_fixtures", fixture_path)
+        assert spec and spec.loader
+        fixture_mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fixture_mod)
+        receiver.apply_nri_payload(fixture_mod.SYNTHETIC_NRI_XML)
 
-    @pytest.mark.asyncio
-    async def test_known_lmd01_after_ff_ifa_state(self, receiver) -> None:
         framing = sys.modules["pioneer_eiscp.protocol.framing"]
         await receiver._handle_frame(
-            framing.EiscpFrame(command="LMD", parameter="FF", raw_iscp="LMDFF")
+            framing.EiscpFrame(command="LMD", parameter="11", raw_iscp="LMD11")
         )
         await receiver._handle_frame(
             framing.EiscpFrame(
                 command="IFA",
-                parameter="OPTICAL 2,Dolby D,48 kHz,5.1 ch,Auto Surround,3.1 ch,48 kHz,",
-                raw_iscp="IFAOPTICAL 2,Dolby D,48 kHz,5.1 ch,Auto Surround,3.1 ch,48 kHz,",
+                parameter="OPTICAL 2,Dolby D,48 kHz,5.1 ch,Dolby Digital,3.1 ch,48 kHz,",
+                raw_iscp="IFAOPTICAL 2,Dolby D,48 kHz,5.1 ch,Dolby Digital,3.1 ch,48 kHz,",
             )
+        )
+        assert receiver.state.listening_mode_code == "11"
+        assert receiver.state.listening_mode == "Pure Direct"
+        assert receiver.state.listening_mode_source == lm.SOURCE_NRI_CODE_MATCH
+        assert receiver.state.audio.output_format == "Dolby Digital"
+        assert receiver.state.listening_mode_select_option == "Pure Direct"
+
+    @pytest.mark.asyncio
+    async def test_known_lmd01_after_ff_state(self, receiver) -> None:
+        framing = sys.modules["pioneer_eiscp.protocol.framing"]
+        await receiver._handle_frame(
+            framing.EiscpFrame(command="LMD", parameter="FF", raw_iscp="LMDFF")
         )
         await receiver._handle_frame(
             framing.EiscpFrame(command="LMD", parameter="01", raw_iscp="LMD01")
@@ -184,30 +191,6 @@ class TestReceiverListeningModeState:
         assert receiver.state.listening_mode_code == "01"
         assert receiver.state.listening_mode == "Direct"
         assert receiver.state.listening_mode_source == lm.SOURCE_LMD_MAPPING
-
-    @pytest.mark.asyncio
-    async def test_ifa_change_refreshes_unknown_lmd_fallback(self, receiver) -> None:
-        framing = sys.modules["pioneer_eiscp.protocol.framing"]
-        await receiver._handle_frame(
-            framing.EiscpFrame(command="LMD", parameter="FF", raw_iscp="LMDFF")
-        )
-        await receiver._handle_frame(
-            framing.EiscpFrame(
-                command="IFA",
-                parameter="OPTICAL 2,Dolby D,48 kHz,5.1 ch,Auto Surround,3.1 ch,48 kHz,",
-                raw_iscp="IFAOPTICAL 2,Dolby D,48 kHz,5.1 ch,Auto Surround,3.1 ch,48 kHz,",
-            )
-        )
-        await receiver._handle_frame(
-            framing.EiscpFrame(
-                command="IFA",
-                parameter="OPTICAL 2,Dolby D,48 kHz,5.1 ch,Stereo,2.0 ch,48 kHz,",
-                raw_iscp="IFAOPTICAL 2,Dolby D,48 kHz,5.1 ch,Stereo,2.0 ch,48 kHz,",
-            )
-        )
-        assert receiver.state.listening_mode_code == "FF"
-        assert receiver.state.listening_mode == "Stereo"
-        assert receiver.state.listening_mode_source == lm.SOURCE_IFA_OUTPUT_FORMAT
 
     @pytest.mark.asyncio
     async def test_nri_selectable_modes_separate_from_current_state(self, receiver) -> None:
@@ -228,10 +211,11 @@ class TestReceiverListeningModeState:
         )
         assert receiver.state.listening_mode_code == "01"
         assert receiver.state.listening_mode == "Direct"
-        assert receiver.state.listening_mode not in selectable
+        assert receiver.state.listening_mode_select_option == "Auto/Direct"
 
         await receiver._handle_frame(
-            framing.EiscpFrame(command="LMD", parameter="FF", raw_iscp="LMDFF")
+            framing.EiscpFrame(command="LMD", parameter="40", raw_iscp="LMD40")
         )
-        assert receiver.state.listening_mode_code == "FF"
-        assert receiver.state.listening_mode == "FF"
+        assert receiver.state.listening_mode_code == "40"
+        assert receiver.state.listening_mode == "40"
+        assert receiver.state.listening_mode_select_option is None

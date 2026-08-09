@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.14
+
+- Separate listening mode from IFA audio output format; remove IFA fallback for `listening_mode`.
+- Match enabled NRI command codes to select/current display (e.g. LMD11 → Pure Direct while IFA reports Dolby Digital).
+- Request LMD/IFA state after listening-mode commands for authoritative receiver confirmation.
+
 ## 0.1.13
 
 - Fix listening-mode select entity: reconcile exact receiver state to NRI command-family options so HA no longer shows Unknown when state labels differ (e.g. Auto Surround → Auto/Direct).

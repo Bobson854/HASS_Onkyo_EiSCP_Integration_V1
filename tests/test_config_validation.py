@@ -17,8 +17,9 @@ BASE = ROOT / "custom_components" / "pioneer_eiscp"
 
 def _load_config_validation():
     """Load config_validation without importing Home Assistant dependencies."""
-    if "pioneer_eiscp.config_validation" in sys.modules:
-        return sys.modules["pioneer_eiscp.config_validation"]
+    for mod in list(sys.modules):
+        if mod.startswith("pioneer_eiscp"):
+            del sys.modules[mod]
 
     pkg = types.ModuleType("pioneer_eiscp")
     pkg.__path__ = [str(BASE)]
@@ -95,20 +96,34 @@ class TestValidateEiscpReceiver:
             "create_connection",
             side_effect=OSError("Connection refused"),
         ):
-            with pytest.raises(cv.EiscpConnectionError):
+            with pytest.raises(cv.EiscpConnectionError) as exc_info:
                 cv.validate_eiscp_receiver("192.0.2.10", 60128)
+
+        assert exc_info.value.stage == cv.STAGE_CONNECT
+
+    def test_send_failure_after_connect(self) -> None:
+        mock_sock = MagicMock()
+        mock_sock.sendall.side_effect = OSError("Broken pipe")
+
+        with patch.object(cv.socket, "create_connection", return_value=mock_sock):
+            with pytest.raises(cv.EiscpConnectionError) as exc_info:
+                cv.validate_eiscp_receiver("192.0.2.10", 60128)
+
+        assert exc_info.value.stage == cv.STAGE_SEND
 
     def test_malformed_response_timeout(self) -> None:
         mock_sock = MagicMock()
         mock_sock.recv.side_effect = socket.timeout
 
         with patch.object(cv.socket, "create_connection", return_value=mock_sock):
-            with pytest.raises(cv.EiscpInvalidResponseError):
+            with pytest.raises(cv.EiscpInvalidResponseError) as exc_info:
                 cv.validate_eiscp_receiver(
                     "192.0.2.10",
                     60128,
                     read_timeout=0.2,
                 )
+
+        assert exc_info.value.stage == cv.STAGE_TIMEOUT
 
     def test_non_eiscp_response(self) -> None:
         mock_sock = MagicMock()
@@ -123,17 +138,21 @@ class TestValidateEiscpReceiver:
         mock_sock.recv.side_effect = recv_side_effect
 
         with patch.object(cv.socket, "create_connection", return_value=mock_sock):
-            with pytest.raises(cv.EiscpInvalidResponseError):
+            with pytest.raises(cv.EiscpInvalidResponseError) as exc_info:
                 cv.validate_eiscp_receiver(
                     "192.0.2.10",
                     60128,
                     read_timeout=0.2,
                 )
 
+        assert exc_info.value.stage == cv.STAGE_PARSE
+
     def test_connection_closed_early(self) -> None:
         mock_sock = MagicMock()
         mock_sock.recv.return_value = b""
 
         with patch.object(cv.socket, "create_connection", return_value=mock_sock):
-            with pytest.raises(cv.EiscpInvalidResponseError):
+            with pytest.raises(cv.EiscpInvalidResponseError) as exc_info:
                 cv.validate_eiscp_receiver("192.0.2.10", 60128)
+
+        assert exc_info.value.stage == cv.STAGE_RECV

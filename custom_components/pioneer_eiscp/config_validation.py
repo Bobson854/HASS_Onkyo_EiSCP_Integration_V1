@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import socket
 import time
 from typing import Final
@@ -9,20 +10,34 @@ from typing import Final
 from .const import CMD_POWER, QUERY_SUFFIX, VALIDATION_READ_TIMEOUT, VALIDATION_TIMEOUT
 from .protocol.framing import EiscpFrame, build_packet, parse_packets
 
+_LOGGER = logging.getLogger(__name__)
+
 VALIDATION_QUERY: Final[str] = f"{CMD_POWER}{QUERY_SUFFIX}"
 _VALID_PWR_STATES: Final[frozenset[str]] = frozenset({"00", "01"})
+
+# Validation failure stages (for logging/diagnostics).
+STAGE_CONNECT: Final = "connect"
+STAGE_SEND: Final = "send"
+STAGE_RECV: Final = "recv"
+STAGE_TIMEOUT: Final = "timeout"
+STAGE_PARSE: Final = "parse"
 
 
 class EiscpValidationError(Exception):
     """Base class for setup validation failures."""
 
+    def __init__(self, message: str, *, stage: str) -> None:
+        super().__init__(message)
+        self.stage = stage
+        self.message = message
+
 
 class EiscpConnectionError(EiscpValidationError):
-    """TCP connection could not be established."""
+    """TCP connect or send failure (includes reset during send)."""
 
 
 class EiscpInvalidResponseError(EiscpValidationError):
-    """Connected endpoint did not return a valid eISCP PWR response."""
+    """Connected but no valid eISCP PWR response (closed, timeout, or unparseable)."""
 
 
 def is_valid_pwr_response(frame: EiscpFrame) -> bool:
@@ -37,6 +52,18 @@ def validate_pwr_response_buffer(buffer: bytes) -> EiscpFrame | None:
         if is_valid_pwr_response(frame):
             return frame
     return None
+
+
+def _log_tx_query(host: str, port: int) -> None:
+    packet = build_packet(VALIDATION_QUERY)
+    _LOGGER.debug(
+        "Validation TX %s:%s query=%s packet_len=%d payload=%r",
+        host,
+        port,
+        VALIDATION_QUERY,
+        len(packet),
+        packet[16:],
+    )
 
 
 def validate_eiscp_receiver(
@@ -55,16 +82,28 @@ def validate_eiscp_receiver(
     Returns the raw ISCP body of the PWR response.
 
     Raises:
-        EiscpConnectionError: TCP connect/send failure or connection dropped.
-        EiscpInvalidResponseError: No valid eISCP PWR response within timeout.
+        EiscpConnectionError: TCP connect or send failure.
+        EiscpInvalidResponseError: Peer closed, timeout, or unparseable response.
     """
     sock: socket.socket | None = None
-    try:
-        sock = socket.create_connection((host, port), timeout=connect_timeout)
-        sock.settimeout(0.5)
-        sock.sendall(build_packet(VALIDATION_QUERY))
+    buffer = b""
 
-        buffer = b""
+    try:
+        try:
+            sock = socket.create_connection((host, port), timeout=connect_timeout)
+        except OSError as err:
+            msg = f"TCP connect failed: {err}"
+            raise EiscpConnectionError(msg, stage=STAGE_CONNECT) from err
+
+        sock.settimeout(0.5)
+        _log_tx_query(host, port)
+
+        try:
+            sock.sendall(build_packet(VALIDATION_QUERY))
+        except OSError as err:
+            msg = f"Send failed after TCP connect: {err}"
+            raise EiscpConnectionError(msg, stage=STAGE_SEND) from err
+
         deadline = time.monotonic() + read_timeout
 
         while time.monotonic() < deadline:
@@ -73,25 +112,48 @@ def validate_eiscp_receiver(
             except socket.timeout:
                 frame = validate_pwr_response_buffer(buffer)
                 if frame is not None:
+                    _LOGGER.debug(
+                        "Validation RX %s:%s response=%s bytes=%d",
+                        host,
+                        port,
+                        frame.raw_iscp,
+                        len(buffer),
+                    )
                     return frame.raw_iscp
                 continue
 
             if not chunk:
-                msg = "Connection closed before eISCP response"
-                raise EiscpInvalidResponseError(msg)
+                msg = "Peer closed connection before eISCP PWR response"
+                raise EiscpInvalidResponseError(msg, stage=STAGE_RECV)
 
             buffer += chunk
+            _LOGGER.debug(
+                "Validation RX chunk %s:%s bytes=%d total=%d",
+                host,
+                port,
+                len(chunk),
+                len(buffer),
+            )
             frame = validate_pwr_response_buffer(buffer)
             if frame is not None:
+                _LOGGER.debug(
+                    "Validation RX %s:%s response=%s bytes=%d",
+                    host,
+                    port,
+                    frame.raw_iscp,
+                    len(buffer),
+                )
                 return frame.raw_iscp
 
+        if buffer:
+            msg = "Received data but no valid eISCP PWR response"
+            raise EiscpInvalidResponseError(msg, stage=STAGE_PARSE)
+
         msg = "Timed out waiting for eISCP PWR response"
-        raise EiscpInvalidResponseError(msg)
+        raise EiscpInvalidResponseError(msg, stage=STAGE_TIMEOUT)
 
     except EiscpValidationError:
         raise
-    except OSError as err:
-        raise EiscpConnectionError(str(err)) from err
     finally:
         if sock is not None:
             try:

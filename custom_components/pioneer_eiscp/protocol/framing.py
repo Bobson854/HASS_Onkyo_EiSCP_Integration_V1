@@ -34,8 +34,12 @@ class EiscpFrame:
 
 
 def build_packet(iscp_body: str) -> bytes:
-    """Wrap an ISCP body (e.g. ``PWRQSTN``) in an eISCP TCP packet."""
-    message = f"{_START_CHAR}{_UNIT_TYPE}{iscp_body}{_EOF}\r"
+    """Wrap an ISCP body (e.g. ``PWRQSTN``) in an eISCP TCP packet.
+
+    Outbound commands use CR termination only (``!1<body>\\r``). The SUB
+    byte (``\\x1a``) is not sent; receivers may still include it in responses.
+    """
+    message = f"{_START_CHAR}{_UNIT_TYPE}{iscp_body}\r"
     message_bytes = message.encode("utf-8")
     header = struct.pack(
         "!4sIIB3s",

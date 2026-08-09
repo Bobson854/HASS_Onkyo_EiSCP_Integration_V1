@@ -149,16 +149,41 @@ class PioneerEiscpConfigFlow(ConfigFlow, domain=DOMAIN):
         try:
             await self.hass.async_add_executor_job(validate_eiscp_receiver, host, port)
         except EiscpConnectionError as err:
-            _LOGGER.debug("Setup validation connection failed for %s:%s: %s", host, port, err)
+            _LOGGER.warning(
+                "Setup validation failed for %s:%s stage=%s error=%s: %s",
+                host,
+                port,
+                err.stage,
+                type(err).__name__,
+                err,
+            )
             return {"base": "cannot_connect"}
         except EiscpInvalidResponseError as err:
-            _LOGGER.debug("Setup validation invalid response from %s:%s: %s", host, port, err)
+            _LOGGER.warning(
+                "Setup validation failed for %s:%s stage=%s error=%s: %s",
+                host,
+                port,
+                err.stage,
+                type(err).__name__,
+                err,
+            )
             return {"base": "invalid_response"}
         except EiscpValidationError as err:
-            _LOGGER.warning("Setup validation failed for %s:%s: %s", host, port, err)
+            _LOGGER.warning(
+                "Setup validation failed for %s:%s stage=%s error=%s: %s",
+                host,
+                port,
+                getattr(err, "stage", "unknown"),
+                type(err).__name__,
+                err,
+            )
             return {"base": "unknown"}
         except Exception:  # noqa: BLE001
-            _LOGGER.exception("Unexpected error during eISCP validation for %s:%s", host, port)
+            _LOGGER.exception(
+                "Setup validation unexpected error for %s:%s stage=unknown",
+                host,
+                port,
+            )
             return {"base": "unknown"}
         return {}
 

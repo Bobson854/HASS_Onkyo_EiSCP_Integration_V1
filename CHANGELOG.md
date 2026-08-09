@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.12
+
+- Improve listening-mode display: layered LMD protocol mapping with IFA `output_format` fallback for unknown codes; raw `listening_mode_code` retained separately from NRI selectable command options.
+
 ## 0.1.11
 
 - Remove `return` control flow from read-loop `finally` blocks (Python 3.14 `SyntaxWarning`); cleanup moved to `_finalize_read_loop()` with unchanged transport lifecycle behaviour.

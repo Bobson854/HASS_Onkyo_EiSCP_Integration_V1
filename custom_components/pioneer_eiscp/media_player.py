@@ -119,6 +119,8 @@ class PioneerMainZoneMediaPlayer(PioneerConnectedEntity, MediaPlayerEntity):
         volume_state = self.coordinator.data.main.volume_state
         return {
             "listening_mode": self.coordinator.data.listening_mode,
+            "listening_mode_code": self.coordinator.data.listening_mode_code,
+            "listening_mode_source": self.coordinator.data.listening_mode_source,
             "audio_input_port": audio.input_port,
             "audio_output_format": audio.output_format,
             "connected": self.coordinator.receiver.connected,

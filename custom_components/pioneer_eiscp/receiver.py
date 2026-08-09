@@ -38,6 +38,7 @@ from .protocol.parsers import (
     parse_video_information,
 )
 from .protocol.transport import EiscpConnection
+from .protocol.listening_mode import normalize_lmd_code, resolve_listening_mode_display
 from .protocol.volume import VolumeState, build_volume_state, format_mvl_parameter
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,6 +63,7 @@ class ReceiverState:
     zone2: ZoneState = field(default_factory=ZoneState)
     listening_mode: str | None = None
     listening_mode_code: str | None = None
+    listening_mode_source: str | None = None
     hdmi_output: str | None = None
     audio: AudioInformation = field(default_factory=AudioInformation)
     video: VideoInformation = field(default_factory=VideoInformation)
@@ -93,6 +95,7 @@ class ReceiverState:
             },
             "listening_mode": self.listening_mode,
             "listening_mode_code": self.listening_mode_code,
+            "listening_mode_source": self.listening_mode_source,
             "hdmi_output": self.hdmi_output,
             "audio": self.audio.as_dict(),
             "video": self.video.as_dict(),
@@ -205,13 +208,24 @@ class PioneerReceiver:
         return {name: code for code, name in LISTENING_MODES.items()}
 
     def resolve_listening_mode_name(self, code: str | None) -> str | None:
-        """Resolve an LMD response code to a display name."""
-        if not code:
-            return None
-        nri_name = self.receiver_capabilities_model.resolve_listening_mode_name(code)
-        if nri_name:
-            return nri_name
-        return LISTENING_MODES.get(code.strip().upper()[:2], code)
+        """Resolve an LMD response code to a display name for diagnostics."""
+        display, _source = resolve_listening_mode_display(
+            code,
+            ifa_output_format=self.state.audio.output_format,
+        )
+        return display
+
+    def _refresh_listening_mode_display(self) -> bool:
+        """Recalculate listening-mode display from LMD code and IFA fallback."""
+        display, source = resolve_listening_mode_display(
+            self.state.listening_mode_code,
+            ifa_output_format=self.state.audio.output_format,
+        )
+        if display == self.state.listening_mode and source == self.state.listening_mode_source:
+            return False
+        self.state.listening_mode = display
+        self.state.listening_mode_source = source
+        return True
 
     def apply_nri_payload(self, raw: str) -> ReceiverCapabilities:
         """Parse and store structured capabilities from an NRI payload."""
@@ -345,16 +359,18 @@ class PioneerReceiver:
                 changed = True
 
         elif cmd == CMD_LISTENING_MODE:
-            code = param.strip().upper() if param else None
-            name = self.resolve_listening_mode_name(code)
+            code = normalize_lmd_code(param) if param else None
             if code != self.state.listening_mode_code:
                 self.state.listening_mode_code = code
-                self.state.listening_mode = name
+                changed = True
+            if self._refresh_listening_mode_display():
                 changed = True
 
         elif cmd == CMD_AUDIO_INFO:
             self.state.audio = parse_audio_information(param)
             changed = True
+            if self._refresh_listening_mode_display():
+                changed = True
 
         elif cmd == CMD_VIDEO_INFO:
             self.state.video = parse_video_information(param)

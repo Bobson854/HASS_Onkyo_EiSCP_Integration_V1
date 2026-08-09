@@ -27,7 +27,7 @@ Initial development and testing target the **Pioneer VSX-1131**. Newer Pioneer r
 | Main zone media player | Working |
 | IFA audio information | Working |
 | IFV video information | Parser ready; limited entity exposure |
-| Listening mode | Working (NRI capability list when probed; static fallback) |
+| Listening mode | Resolved display from LMD + IFA fallback; NRI command options separate |
 | Input sources | Dynamic from NRI when probed; static fallback before probe |
 | Volume | Absolute decimal MVL with NRI `volmax` reference when available |
 | HDMI output select | Placeholder (disabled by default) |

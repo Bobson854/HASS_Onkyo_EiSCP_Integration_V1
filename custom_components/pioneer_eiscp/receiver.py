@@ -217,9 +217,23 @@ class PioneerReceiver:
         reference = capabilities.volume_reference
         if reference is not None:
             self.state.main.volume_state.volume_reference = reference
-            if self.state.main.volume_state.raw_parameter:
-                self._update_main_volume(self.state.main.volume_state.raw_parameter)
+        if self.state.main.volume_state.raw_parameter:
+            self._update_main_volume(self.state.main.volume_state.raw_parameter)
+        self._notify_listeners()
         return capabilities
+
+    def resolve_input_name(self, code: str | None) -> str:
+        """Resolve an input selector code to a display name."""
+        if not code:
+            return "unknown"
+        return self.get_input_source_map().get(code.upper(), "unknown")
+
+    def get_state_dict(self) -> dict[str, Any]:
+        """Return receiver state with NRI-aware derived fields."""
+        data = self.state.as_dict()
+        code = self.state.main.input_code or ""
+        data["main"]["input_name"] = self.resolve_input_name(code or None)
+        return data
 
     async def set_mute(self, muted: bool) -> None:
         """Set main zone mute."""

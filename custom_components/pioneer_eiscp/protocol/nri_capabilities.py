@@ -8,14 +8,34 @@ from typing import Any
 from .nri_parser import parse_nri_response
 
 
-def _node_attrs(node: dict[str, Any] | None) -> dict[str, str]:
+def extract_text(value: Any) -> str | None:
+    """Extract scalar text from parser nodes or plain strings."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, dict):
+        if "@text" in value:
+            return extract_text(value["@text"])
+        return None
+    return str(value).strip() or None
+
+
+def extract_attributes(node: Any) -> dict[str, str]:
+    """Return @attributes from a parsed NRI node as string values."""
     if not isinstance(node, dict):
         return {}
-    attrs = node.get("@attributes", {})
-    return {str(k): str(v) for k, v in attrs.items()} if isinstance(attrs, dict) else {}
+    attrs = node.get("@attributes")
+    if not isinstance(attrs, dict):
+        return {}
+    return {str(key): str(val) for key, val in attrs.items()}
 
 
-def _as_nodes(value: Any) -> list[dict[str, Any]]:
+def normalize_list(value: Any) -> list[dict[str, Any]]:
+    """Normalize singleton-or-list collection nodes into a list of dicts."""
     if value is None:
         return []
     if isinstance(value, list):
@@ -25,8 +45,26 @@ def _as_nodes(value: Any) -> list[dict[str, Any]]:
     return []
 
 
+def get_device_container(response: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the device container that holds NRI capability collections."""
+    device = response.get("device")
+    if isinstance(device, dict):
+        return device
+    devices = normalize_list(device)
+    return devices[0] if devices else None
+
+
 def _attr_true(value: str | None) -> bool:
     return value == "1"
+
+
+def _parse_int(value: str | None) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value, 10)
+    except ValueError:
+        return None
 
 
 @dataclass(slots=True)
@@ -108,6 +146,8 @@ class ControlCapability:
     control_id: str
     enabled: bool = False
     code: str | None = None
+    position: str | None = None
+    zone: str | None = None
     min_value: str | None = None
     max_value: str | None = None
     step: str | None = None
@@ -117,6 +157,8 @@ class ControlCapability:
             "control_id": self.control_id,
             "enabled": self.enabled,
             "code": self.code,
+            "position": self.position,
+            "zone": self.zone,
             "min_value": self.min_value,
             "max_value": self.max_value,
             "step": self.step,
@@ -132,16 +174,17 @@ class ReceiverCapabilities:
     selectors: list[InputSelector] = field(default_factory=list)
     controls: list[ControlCapability] = field(default_factory=list)
     functions: dict[str, bool] = field(default_factory=dict)
-    network_services: dict[str, Any] = field(default_factory=dict)
-    tuners: dict[str, Any] = field(default_factory=dict)
+    network_services: list[dict[str, Any]] = field(default_factory=list)
+    tuners: list[dict[str, Any]] = field(default_factory=list)
     zone2_supported: bool = False
     raw: str = ""
     parse_error: str | None = None
 
     def main_zone(self) -> ZoneCapability | None:
         for zone in self.zones:
+            zone_name = (zone.name or "").lower().replace(" ", "")
             zone_id = zone.zone_id.lower()
-            if zone_id in {"main", "zone1", "mainzone"}:
+            if zone_name == "main" or zone_id in {"1", "main", "zone1", "mainzone"}:
                 return zone
         return self.zones[0] if self.zones else None
 
@@ -167,7 +210,6 @@ class ReceiverCapabilities:
         ]
 
     def listening_mode_map(self) -> dict[str, str]:
-        """Map display name -> LMD command suffix/code."""
         result: dict[str, str] = {}
         for control in self.listening_mode_controls():
             if control.code:
@@ -198,89 +240,81 @@ class ReceiverCapabilities:
         }
 
 
-def _parse_int(value: str | None) -> int | None:
-    if value is None or value == "":
-        return None
-    try:
-        return int(value, 10)
-    except ValueError:
-        return None
-
-
-def _parse_identity(response: dict[str, Any]) -> ReceiverIdentity:
-    device_nodes = _as_nodes(response.get("device"))
-    identity = ReceiverIdentity()
-    if not device_nodes:
-        return identity
-
-    device = device_nodes[0]
-    attrs = _node_attrs(device)
-    identity.serial = attrs.get("deviceserial") or attrs.get("serial")
-    identity.mac_address = attrs.get("macaddress")
-    identity.model = attrs.get("model") or attrs.get("modelname")
-    identity.brand = attrs.get("brand")
-    identity.firmware_version = attrs.get("firmwareversion")
-    identity.year = attrs.get("year")
-    identity.category = attrs.get("category")
-
-    for key, attr in (
+def _identity_field_map() -> tuple[tuple[str, str], ...]:
+    return (
+        ("brand", "brand"),
+        ("model", "model"),
         ("modelname", "model"),
         ("deviceserial", "serial"),
         ("macaddress", "mac_address"),
         ("firmwareversion", "firmware_version"),
-    ):
-        if key in device and isinstance(device[key], dict):
-            text = device[key].get("@text")
-            if text and getattr(identity, attr if attr != "mac_address" else "mac_address") is None:
-                setattr(identity, attr, text)
+        ("year", "year"),
+        ("category", "category"),
+    )
+
+
+def _parse_identity(device: dict[str, Any]) -> ReceiverIdentity:
+    identity = ReceiverIdentity()
+    device_attrs = extract_attributes(device)
+
+    for xml_key, attr_name in _identity_field_map():
+        if xml_key in device:
+            value = extract_text(device[xml_key])
+            if value:
+                setattr(identity, attr_name, value)
+
+    if device_attrs:
+        identity.serial = identity.serial or device_attrs.get("deviceserial") or device_attrs.get("serial")
+        identity.mac_address = identity.mac_address or device_attrs.get("macaddress")
+        identity.model = identity.model or device_attrs.get("model") or device_attrs.get("modelname")
+        identity.brand = identity.brand or device_attrs.get("brand")
+        identity.firmware_version = identity.firmware_version or device_attrs.get("firmwareversion")
+        identity.year = identity.year or device_attrs.get("year")
+        identity.category = identity.category or device_attrs.get("category")
 
     return identity
 
 
-def _parse_zones(response: dict[str, Any]) -> list[ZoneCapability]:
+def _parse_zones(device: dict[str, Any]) -> list[ZoneCapability]:
     zones: list[ZoneCapability] = []
-    for zonelist_key in ("zonelist", "zone_list", "zones"):
-        zone_root = response.get(zonelist_key)
-        if zone_root is None:
-            continue
-        if isinstance(zone_root, dict):
-            zone_nodes = _as_nodes(zone_root.get("zone"))
-        else:
-            zone_nodes = []
-        for node in zone_nodes:
-            attrs = _node_attrs(node)
-            zone_id = attrs.get("id") or attrs.get("name") or "unknown"
-            zones.append(
-                ZoneCapability(
-                    zone_id=zone_id,
-                    enabled=_attr_true(attrs.get("value")),
-                    name=attrs.get("name"),
-                    volume_max=_parse_int(attrs.get("volmax")),
-                    volume_step=attrs.get("volstep"),
-                    src=attrs.get("src"),
-                    dst=attrs.get("dst"),
-                    lrselect=attrs.get("lrselect"),
-                )
+    zone_root = device.get("zonelist")
+    if not isinstance(zone_root, dict):
+        return zones
+
+    for node in normalize_list(zone_root.get("zone")):
+        attrs = extract_attributes(node)
+        zone_id = attrs.get("id") or attrs.get("name") or "unknown"
+        zones.append(
+            ZoneCapability(
+                zone_id=zone_id,
+                enabled=_attr_true(attrs.get("value")),
+                name=attrs.get("name"),
+                volume_max=_parse_int(attrs.get("volmax")),
+                volume_step=attrs.get("volstep"),
+                src=attrs.get("src"),
+                dst=attrs.get("dst"),
+                lrselect=attrs.get("lrselect"),
             )
+        )
     return zones
 
 
-def _parse_selectors(response: dict[str, Any]) -> list[InputSelector]:
+def _parse_selectors(device: dict[str, Any]) -> list[InputSelector]:
     selectors: list[InputSelector] = []
-    selector_root = response.get("selectorlist")
+    selector_root = device.get("selectorlist")
     if not isinstance(selector_root, dict):
         return selectors
 
-    for node in _as_nodes(selector_root.get("selector")):
-        attrs = _node_attrs(node)
+    for node in normalize_list(selector_root.get("selector")):
+        attrs = extract_attributes(node)
         code = (attrs.get("id") or attrs.get("code") or "").upper()
         if not code:
             continue
-        name = attrs.get("name") or node.get("@text") or code
+        name = attrs.get("name") or extract_text(node) or code
         extra = {
-            k: v
-            for k, v in attrs.items()
-            if k not in {"id", "code", "name", "value", "zone", "iconid"}
+            key: value
+            for key, value in attrs.items()
+            if key not in {"id", "code", "name", "value", "zone", "iconid"}
         }
         selectors.append(
             InputSelector(
@@ -295,20 +329,22 @@ def _parse_selectors(response: dict[str, Any]) -> list[InputSelector]:
     return selectors
 
 
-def _parse_controls(response: dict[str, Any]) -> list[ControlCapability]:
+def _parse_controls(device: dict[str, Any]) -> list[ControlCapability]:
     controls: list[ControlCapability] = []
-    control_root = response.get("controllist")
+    control_root = device.get("controllist")
     if not isinstance(control_root, dict):
         return controls
 
-    for node in _as_nodes(control_root.get("control")):
-        attrs = _node_attrs(node)
-        control_id = attrs.get("id") or attrs.get("name") or "unknown"
+    for node in normalize_list(control_root.get("control")):
+        attrs = extract_attributes(node)
+        control_id = attrs.get("id") or attrs.get("name") or extract_text(node) or "unknown"
         controls.append(
             ControlCapability(
                 control_id=control_id,
                 enabled=_attr_true(attrs.get("value")),
                 code=attrs.get("code"),
+                position=attrs.get("position"),
+                zone=attrs.get("zone"),
                 min_value=attrs.get("min"),
                 max_value=attrs.get("max"),
                 step=attrs.get("step"),
@@ -317,18 +353,68 @@ def _parse_controls(response: dict[str, Any]) -> list[ControlCapability]:
     return controls
 
 
-def _parse_functions(response: dict[str, Any]) -> dict[str, bool]:
+def _parse_functions(device: dict[str, Any]) -> dict[str, bool]:
     functions: dict[str, bool] = {}
-    for root_key in ("functionlist", "functions"):
-        function_root = response.get(root_key)
-        if not isinstance(function_root, dict):
-            continue
-        for node in _as_nodes(function_root.get("function")):
-            attrs = _node_attrs(node)
-            name = attrs.get("id") or attrs.get("name")
-            if name:
-                functions[name] = _attr_true(attrs.get("value"))
+    function_root = device.get("functionlist")
+    if not isinstance(function_root, dict):
+        return functions
+
+    for node in normalize_list(function_root.get("function")):
+        attrs = extract_attributes(node)
+        name = attrs.get("id") or attrs.get("name") or extract_text(node)
+        if name:
+            functions[name] = _attr_true(attrs.get("value"))
     return functions
+
+
+def _parse_network_services(device: dict[str, Any]) -> list[dict[str, Any]]:
+    services: list[dict[str, Any]] = []
+    service_root = device.get("netservicelist")
+    if not isinstance(service_root, dict):
+        return services
+
+    for node in normalize_list(service_root.get("netservice")):
+        attrs = extract_attributes(node)
+        services.append(
+            {
+                "id": attrs.get("id") or attrs.get("name"),
+                "name": attrs.get("name") or extract_text(node),
+                "enabled": _attr_true(attrs.get("value")),
+                "attributes": attrs,
+            }
+        )
+    return services
+
+
+def _parse_tuners(device: dict[str, Any]) -> list[dict[str, Any]]:
+    tuners: list[dict[str, Any]] = []
+    tuner_root = device.get("tuners")
+    if not isinstance(tuner_root, dict):
+        return tuners
+
+    for node in normalize_list(tuner_root.get("tuner")):
+        attrs = extract_attributes(node)
+        tuners.append(
+            {
+                "id": attrs.get("id") or attrs.get("name"),
+                "name": attrs.get("name") or extract_text(node),
+                "enabled": _attr_true(attrs.get("value")),
+                "band": attrs.get("band"),
+                "attributes": attrs,
+            }
+        )
+    return tuners
+
+
+def _detect_zone2(zones: list[ZoneCapability]) -> bool:
+    for zone in zones:
+        if not zone.enabled:
+            continue
+        zone_name = (zone.name or "").lower().replace(" ", "")
+        zone_id = zone.zone_id.lower()
+        if zone_id in {"2", "zone2"} or zone_name == "zone2":
+            return True
+    return False
 
 
 def build_receiver_capabilities(raw: str) -> ReceiverCapabilities:
@@ -344,19 +430,18 @@ def build_receiver_capabilities(raw: str) -> ReceiverCapabilities:
         capabilities.parse_error = capabilities.parse_error or "Missing response root"
         return capabilities
 
-    capabilities.identity = _parse_identity(response)
-    capabilities.zones = _parse_zones(response)
-    capabilities.selectors = _parse_selectors(response)
-    capabilities.controls = _parse_controls(response)
-    capabilities.functions = _parse_functions(response)
+    device = get_device_container(response)
+    if device is None:
+        capabilities.parse_error = capabilities.parse_error or "Missing device container"
+        return capabilities
 
-    if isinstance(response.get("networkservices"), dict):
-        capabilities.network_services = response["networkservices"]
-    if isinstance(response.get("tunerlist"), dict):
-        capabilities.tuners = response["tunerlist"]
-
-    for zone in capabilities.zones:
-        if zone.zone_id.lower() in {"zone2", "zone 2"} and zone.enabled:
-            capabilities.zone2_supported = True
+    capabilities.identity = _parse_identity(device)
+    capabilities.zones = _parse_zones(device)
+    capabilities.selectors = _parse_selectors(device)
+    capabilities.controls = _parse_controls(device)
+    capabilities.functions = _parse_functions(device)
+    capabilities.network_services = _parse_network_services(device)
+    capabilities.tuners = _parse_tuners(device)
+    capabilities.zone2_supported = _detect_zone2(capabilities.zones)
 
     return capabilities

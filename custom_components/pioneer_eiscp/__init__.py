@@ -11,6 +11,7 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.selector import ConfigEntrySelector
 
@@ -35,6 +36,8 @@ if TYPE_CHECKING:
     PioneerEiscpConfigEntry = ConfigEntry[PioneerEiscpCoordinator]
 else:
     PioneerEiscpConfigEntry = ConfigEntry
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
